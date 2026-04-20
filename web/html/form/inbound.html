@@ -74,7 +74,8 @@
             <a-select-option value="never">{{ i18n
                 "pages.inbounds.periodicTrafficReset.never" }}</a-select-option>
             <a-select-option value="hourly">{{ i18n
-                "pages.inbounds.periodicTrafficReset.hourly" }}</a-select-option>
+                "pages.inbounds.periodicTrafficReset.hourly"
+                }}</a-select-option>
             <a-select-option value="daily">{{ i18n
                 "pages.inbounds.periodicTrafficReset.daily" }}</a-select-option>
             <a-select-option value="weekly">{{ i18n
@@ -152,6 +153,11 @@
 <!-- tun -->
 <template v-if="inbound.protocol === Protocols.TUN">
     {{template "form/tun"}}
+</template>
+
+<!-- hysteria -->
+<template v-if="inbound.protocol === Protocols.HYSTERIA">
+    {{template "form/hysteria"}}
 </template>
 
 <!-- stream settings -->
