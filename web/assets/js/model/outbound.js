@@ -1137,13 +1137,15 @@ Outbound.FreedomSettings = class extends CommonClass {
         domainStrategy = '',
         redirect = '',
         fragment = {},
-        noises = []
+        noises = [],
+        ipsBlocked = [],
     ) {
         super();
         this.domainStrategy = domainStrategy;
         this.redirect = redirect;
-        this.fragment = fragment;
-        this.noises = noises;
+        this.fragment = fragment || {};
+        this.noises = Array.isArray(noises) ? noises : [];
+        this.ipsBlocked = Array.isArray(ipsBlocked) ? ipsBlocked : [];
     }
 
     addNoise() {
@@ -1158,8 +1160,9 @@ Outbound.FreedomSettings = class extends CommonClass {
         return new Outbound.FreedomSettings(
             json.domainStrategy,
             json.redirect,
-            json.fragment ? Outbound.FreedomSettings.Fragment.fromJson(json.fragment) : undefined,
-            json.noises ? json.noises.map(noise => Outbound.FreedomSettings.Noise.fromJson(noise)) : undefined,
+            json.fragment ? Outbound.FreedomSettings.Fragment.fromJson(json.fragment) : {},
+            json.noises ? json.noises.map(noise => Outbound.FreedomSettings.Noise.fromJson(noise)) : [],
+            json.ipsBlocked || [],
         );
     }
 
@@ -1169,6 +1172,7 @@ Outbound.FreedomSettings = class extends CommonClass {
             redirect: ObjectUtil.isEmpty(this.redirect) ? undefined : this.redirect,
             fragment: Object.keys(this.fragment).length === 0 ? undefined : this.fragment,
             noises: this.noises.length === 0 ? undefined : Outbound.FreedomSettings.Noise.toJsonArray(this.noises),
+            ipsBlocked: this.ipsBlocked.length === 0 ? undefined : this.ipsBlocked,
         };
     }
 };
