@@ -987,12 +987,18 @@ func (s *SubService) genHysteriaLink(inbound *model.Inbound, email string) strin
 	if len(externalProxies) > 0 {
 		links := make([]string, 0, len(externalProxies))
 		for _, externalProxy := range externalProxies {
-			ep, _ := externalProxy.(map[string]interface{})
+			ep, ok := externalProxy.(map[string]interface{})
+			if !ok {
+				continue
+			}
 			dest, _ := ep["dest"].(string)
-			epPort := int(ep["port"].(float64))
+			portF, okPort := ep["port"].(float64)
+			if dest == "" || !okPort {
+				continue
+			}
 			epRemark, _ := ep["remark"].(string)
 
-			link := fmt.Sprintf("%s://%s@%s:%d", protocol, auth, dest, epPort)
+			link := fmt.Sprintf("%s://%s@%s:%d", protocol, auth, dest, int(portF))
 			u, _ := url.Parse(link)
 			q := u.Query()
 			for k, v := range params {
