@@ -62,3 +62,6 @@ corebundle/core/*
 /test_unit/results/
 __pycache__/
 *.pyc
+
+# Local-only project notes — keep on disk, never commit.
+/MEMORY.md
