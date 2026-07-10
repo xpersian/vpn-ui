@@ -44,7 +44,7 @@ Este proyecto es una versión mejorada del panel **[3X-UI](https://github.com/MH
 ## Instalación del panel
 
 ```bash
-sudo bash <(curl -Ls https://raw.githubusercontent.com/Sir-MmD/vpn-ui/refs/heads/main/deploy.sh)
+curl -Ls https://raw.githubusercontent.com/Sir-MmD/vpn-ui/refs/heads/main/deploy.sh | sudo bash
 ```
 
 ## Desinstalación del panel

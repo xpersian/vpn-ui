@@ -44,7 +44,7 @@
 ## نصب پنل
 
 ```bash
-sudo bash <(curl -Ls https://raw.githubusercontent.com/Sir-MmD/vpn-ui/refs/heads/main/deploy.sh)
+curl -Ls https://raw.githubusercontent.com/Sir-MmD/vpn-ui/refs/heads/main/deploy.sh | sudo bash
 ```
 
 ## حذف پنل
