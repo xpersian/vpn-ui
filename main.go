@@ -69,6 +69,23 @@ func stdoutIsTTY() bool {
 	return fi.Mode()&os.ModeCharDevice != 0
 }
 
+// requireRoot exits with a clear error when the binary is run without root. The
+// panel binds privileged ports, writes /etc and systemd units, manages nftables
+// and policy routing, and supervises the bundled VPN daemons — none of which
+// work without root. Colored on a TTY (honors NO_COLOR).
+func requireRoot() {
+	if os.Geteuid() == 0 {
+		return
+	}
+	const m = "vpn-ui must be run as root. It binds privileged ports, writes systemd units, and manages nftables, routing and the VPN daemons.\n       Try: sudo vpn-ui"
+	if fi, err := os.Stderr.Stat(); err == nil && os.Getenv("NO_COLOR") == "" && fi.Mode()&os.ModeCharDevice != 0 {
+		fmt.Fprintf(os.Stderr, "\x1b[1;38;5;203mError:\x1b[0m %s\n", m)
+	} else {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", m)
+	}
+	os.Exit(1)
+}
+
 // ansiVpnUI renders "[VPN-UI]" in the panel logo's colours — teal brackets,
 // deep-teal letters, a green hyphen — as a bold CLI banner. Falls back to plain
 // text when NO_COLOR is set or stdout isn't a TTY.
@@ -135,6 +152,7 @@ func warnUnsupportedDistro() {
 }
 
 func runWebServer() {
+	requireRoot()
 	fmt.Println(ansiVpnUI())
 	log.Printf("Starting %v %v", config.GetName(), config.GetVersion())
 
@@ -1199,6 +1217,7 @@ func main() {
 			}
 		}
 		if onlySwitches && (doRandom || doSystemd || doUninstall) {
+			requireRoot()
 			// Uninstall is exclusive and destructive — if requested, run only it.
 			if doUninstall {
 				runUninstall(doForce)
