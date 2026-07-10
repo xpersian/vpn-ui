@@ -1419,7 +1419,7 @@ func (s *InboundService) BulkUpdateClients(req BulkClientUpdateRequest) (BulkCli
 	touched := map[string]bool{}
 
 	switch req.Op {
-	case "addDays", "subDays", "addTraffic", "subTraffic", "enable", "disable", "delete":
+	case "addDays", "subDays", "addTraffic", "subTraffic", "enable", "disable", "delete", "freeze", "unfreeze":
 	default:
 		return result, touched, common.NewError("unknown bulk operation:", req.Op)
 	}
@@ -1586,6 +1586,34 @@ func applyBulkClientOp(cm map[string]any, req BulkClientUpdateRequest, now int64
 	expiry := bulkNumToInt64(cm["expiryTime"])
 	total := bulkNumToInt64(cm["totalGB"])
 	enable, _ := cm["enable"].(bool)
+
+	// Freeze/unfreeze are explicit actions and bypass the skip toggles. Freeze disables
+	// the account and LOCKS its remaining time: a running (absolute) expiry is stored as
+	// its negative remaining — the panel's "delayed start" form, which does not tick down
+	// or trigger the auto-disable/expire check while the account is off. GB is locked for
+	// free (a disabled account passes no traffic). Unfreeze re-enables and resumes the
+	// clock immediately, converting the locked remaining back to an absolute deadline from
+	// now. A frozen account is thus recognisable as (enable=false AND expiryTime<0).
+	switch req.Op {
+	case "freeze":
+		if !enable && expiry <= 0 {
+			return false // already off with nothing counting -> no-op
+		}
+		if expiry > 0 {
+			cm["expiryTime"] = now - expiry // = -(remaining): a non-ticking delayed value
+		}
+		cm["enable"] = false
+		return true
+	case "unfreeze":
+		if enable {
+			return false // already active -> nothing to unfreeze
+		}
+		if expiry < 0 {
+			cm["expiryTime"] = now - expiry // = now + remaining: resume from this moment
+		}
+		cm["enable"] = true
+		return true
+	}
 
 	if req.SkipFirstUse && expiry < 0 {
 		return false

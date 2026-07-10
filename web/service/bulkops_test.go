@@ -95,6 +95,48 @@ func TestBulkUnknownOpRejected(t *testing.T) {
 	}
 }
 
+// TestBulkFreezeUnfreeze covers the freeze/unfreeze ops: freeze disables + parks the
+// expiry (locking the remaining time), unfreeze re-enables + resumes from now.
+func TestBulkFreezeUnfreeze(t *testing.T) {
+	const day = bulkMsPerDay
+	cm := clientMap(testNow+10*day, 1000, true) // 10 days remaining, in use
+	if !applyBulkClientOp(cm, BulkClientUpdateRequest{Op: "freeze"}, testNow) {
+		t.Fatal("freeze should apply")
+	}
+	if en, _ := cm["enable"].(bool); en {
+		t.Error("freeze should disable")
+	}
+	// remaining time is locked as a negative (non-ticking) value.
+	if got := int64Of(cm["expiryTime"]); got != -10*day {
+		t.Errorf("freeze expiry = %d, want %d (negative remaining)", got, -10*day)
+	}
+	if applyBulkClientOp(cm, BulkClientUpdateRequest{Op: "freeze"}, testNow) {
+		t.Error("re-freeze of an already-off, non-counting account should be a no-op")
+	}
+	// unfreeze 3 days later -> re-enabled, expiry = later + 10 days (resume from now).
+	later := testNow + 3*day
+	if !applyBulkClientOp(cm, BulkClientUpdateRequest{Op: "unfreeze"}, later) {
+		t.Fatal("unfreeze should apply")
+	}
+	if en, _ := cm["enable"].(bool); !en {
+		t.Error("unfreeze should enable")
+	}
+	if got := int64Of(cm["expiryTime"]); got != later+10*day {
+		t.Errorf("unfreeze expiry = %d, want %d", got, later+10*day)
+	}
+	if applyBulkClientOp(cm, BulkClientUpdateRequest{Op: "unfreeze"}, later) {
+		t.Error("unfreeze of an active account should be a no-op")
+	}
+	// freeze a no-expiry account: just disabled, expiry stays 0 (nothing to lock).
+	cm2 := clientMap(0, 0, true)
+	if !applyBulkClientOp(cm2, BulkClientUpdateRequest{Op: "freeze"}, testNow) {
+		t.Fatal("freeze of a no-expiry account should apply (disable)")
+	}
+	if en, _ := cm2["enable"].(bool); en || int64Of(cm2["expiryTime"]) != 0 {
+		t.Error("freeze no-expiry: should be disabled with expiry 0")
+	}
+}
+
 // TestBulkClientSkipped covers the skip toggles shared by the update ops and the new
 // "delete" op: a client excluded by a toggle must not be deleted.
 func TestBulkClientSkipped(t *testing.T) {

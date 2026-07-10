@@ -851,6 +851,8 @@
           <a-select-option value="subTraffic">{{ i18n "pages.inbounds.opSubTraffic" }}</a-select-option>
           <a-select-option value="enable">{{ i18n "pages.inbounds.opEnable" }}</a-select-option>
           <a-select-option value="disable">{{ i18n "pages.inbounds.opDisable" }}</a-select-option>
+          <a-select-option value="freeze">{{ i18n "pages.inbounds.opFreeze" }}</a-select-option>
+          <a-select-option value="unfreeze">{{ i18n "pages.inbounds.opUnfreeze" }}</a-select-option>
           <a-select-option value="delete">{{ i18n "pages.inbounds.opDelete" }}</a-select-option>
         </a-select>
       </a-form-item>
@@ -2146,6 +2148,33 @@
           clients[index].enable = typeof state === 'boolean' ? state : !!client.enable;
           clientId = this.getClientId(dbInbound.protocol, clients[index]);
           await this.updateClient(clients[index], dbInboundId, clientId);
+        } finally {
+          this.loading(false);
+        }
+      },
+      isFrozen(client) {
+        // Frozen = disabled with a locked (negative, non-ticking) remaining time.
+        return !!client && client.enable === false && Number(client.expiryTime) < 0;
+      },
+      async toggleFreeze(dbInboundId, client) {
+        // Freeze/unfreeze reuse the bulk endpoint (single target) so the time-lock math
+        // lives in one place (the backend). Freeze disables + locks remaining days;
+        // unfreeze re-enables + resumes them.
+        if (!client || !client.email) return;
+        const op = this.isFrozen(client) ? 'unfreeze' : 'freeze';
+        this.loading();
+        try {
+          const payload = {
+            op, days: 0, amountBytes: 0,
+            skipFirstUse: false, skipUnlimited: false, skipDisabled: false,
+            targets: [{ inboundId: dbInboundId, email: client.email }],
+          };
+          const msg = await HttpUtil.post('/panel/api/inbounds/bulkUpdateClients', { data: JSON.stringify(payload) });
+          if (msg.success) {
+            this.$message.success(op === 'freeze'
+              ? '{{ i18n "pages.client.freeze" }}' : '{{ i18n "pages.client.unfreeze" }}');
+            await this.getDBInbounds();
+          }
         } finally {
           this.loading(false);
         }

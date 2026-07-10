@@ -44,6 +44,8 @@ func keySet(keys ...string) map[string]bool {
 // this set, so the gap can never grow silently.
 var knownMissing = keySet(
 	"pages.inbounds.opDelete", "pages.inbounds.bulkDeleteConfirm",
+	"pages.inbounds.opFreeze", "pages.inbounds.opUnfreeze",
+	"pages.client.freeze", "pages.client.unfreeze",
 	"pages.core.absent", "pages.core.actions", "pages.core.consoleTitle",
 	"pages.core.cores", "pages.core.disabled", "pages.core.editConfig",
 	"pages.core.enabled", "pages.core.hideLog", "pages.core.inbounds",

@@ -294,6 +294,8 @@
 "opSubTraffic" = "Subtract traffic"
 "opEnable" = "Enable"
 "opDisable" = "Disable"
+"opFreeze" = "Freeze"
+"opUnfreeze" = "Unfreeze"
 "opDelete" = "Delete"
 "bulkDeleteConfirm" = "Permanently delete %INBOUNDS% inbound(s) and %CLIENTS% account(s)? Deleting an inbound removes all of its accounts. This cannot be undone."
 "amount" = "Amount"
@@ -386,6 +388,8 @@
 [pages.client]
 "add" = "Add Client"
 "edit" = "Edit Client"
+"freeze" = "Freeze"
+"unfreeze" = "Unfreeze"
 "submitAdd" = "Add Client"
 "submitEdit" = "Save Changes"
 "clientCount" = "Number of Clients"

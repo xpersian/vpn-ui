@@ -24,6 +24,10 @@
     </a-popconfirm>
   </a-tooltip>
   <a-tooltip>
+    <template slot="title">[[ isFrozen(client) ? '{{ i18n "pages.client.unfreeze" }}' : '{{ i18n "pages.client.freeze" }}' ]]</template>
+    <a-icon :style="{ fontSize: '22px', cursor: 'pointer', color: isFrozen(client) ? 'var(--color-primary-100)' : '' }" class="normal-icon" :type="isFrozen(client) ? 'unlock' : 'lock'" v-if="client.email.length > 0" @click="toggleFreeze(record.id, client)"></a-icon>
+  </a-tooltip>
+  <a-tooltip>
     <template slot="title">
       <span :style="{ color: '#FF4D4F' }"> {{ i18n "delete"}}</span>
     </template>
@@ -171,6 +175,10 @@
       <a-menu-item @click="resetClientTraffic(client,record.id)" v-if="client.email.length > 0">
         <a-icon :style="{ fontSize: '14px' }" type="retweet"></a-icon>
         {{ i18n "pages.inbounds.resetTraffic" }}
+      </a-menu-item>
+      <a-menu-item @click="toggleFreeze(record.id, client)" v-if="client.email.length > 0">
+        <a-icon :style="{ fontSize: '14px' }" :type="isFrozen(client) ? 'unlock' : 'lock'"></a-icon>
+        [[ isFrozen(client) ? '{{ i18n "pages.client.unfreeze" }}' : '{{ i18n "pages.client.freeze" }}' ]]
       </a-menu-item>
       <a-menu-item v-if="isRemovable(record.id)" @click="delClient(record.id,client)">
         <a-icon :style="{ fontSize: '14px' }" type="delete"></a-icon>
