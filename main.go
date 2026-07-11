@@ -69,6 +69,16 @@ func stdoutIsTTY() bool {
 	return fi.Mode()&os.ModeCharDevice != 0
 }
 
+// isInfoArg reports whether an argument is a harmless info switch (version/help)
+// that should run without root.
+func isInfoArg(a string) bool {
+	switch strings.TrimPrefix(strings.TrimPrefix(a, "-"), "-") {
+	case "v", "version", "h", "help":
+		return true
+	}
+	return false
+}
+
 // requireRoot exits with a clear error when the binary is run without root. The
 // panel binds privileged ports, writes /etc and systemd units, manages nftables
 // and policy routing, and supervises the bundled VPN daemons — none of which
@@ -389,6 +399,19 @@ func randomFreePort() int {
 // can log in. Invoked by `vpn-ui --random` (composable with --systemd, which is
 // applied afterwards so the unit boots with these settings).
 func randomizeSetting() error {
+	// A running panel holds the SQLite DB open and serves the OLD port/creds/webpath.
+	// Writing new settings underneath it races the live process (and the panel would
+	// keep the stale values until a restart anyway), so stop the systemd-managed
+	// panel first and bring it back up on the new settings afterwards. No-op on a
+	// fresh install (nothing running yet); a following --systemd starts it either way.
+	svc := service.SystemdService{}
+	unit := svc.GetServiceName()
+	panelWasActive := exec.Command("systemctl", "is-active", "--quiet", unit).Run() == nil
+	if panelWasActive {
+		fmt.Printf("Stopping %s before applying randomized settings...\n", unit)
+		_ = exec.Command("systemctl", "stop", unit).Run()
+	}
+
 	if err := database.InitDB(config.GetDBPath()); err != nil {
 		fmt.Println("Database initialization failed:", err)
 		return err
@@ -436,6 +459,13 @@ func randomizeSetting() error {
 	fmt.Printf("  URL:      %s\n", url)
 	if ip == "N/A" {
 		fmt.Println("  (could not detect public IP — substitute the server's address in the URL)")
+	}
+
+	// Bring the panel back up on the new settings (only if we stopped it above; on a
+	// fresh install a following --systemd starts it instead).
+	if panelWasActive {
+		fmt.Printf("Restarting %s with the new settings...\n", unit)
+		_ = exec.Command("systemctl", "start", unit).Run()
 	}
 	return nil
 }
@@ -1311,6 +1341,15 @@ func main() {
 	if len(os.Args) < 2 {
 		runWebServer()
 		return
+	}
+
+	// Root is required for every mode except the harmless info switches (version /
+	// help): the panel and all its subcommands bind privileged ports, write /etc +
+	// systemd units, and manage nftables/routing/daemons. Enforce it up front so a
+	// non-root invocation fails with one clear message instead of an obscure
+	// permission error deeper in.
+	if !isInfoArg(os.Args[1]) {
+		requireRoot()
 	}
 
 	// Standalone maintenance switches. They can be combined in any order, e.g.

@@ -254,10 +254,9 @@
           <pre v-if="item.log && expanded[i]" class="term-steplog">[[ item.log ]]</pre>
         </div>
 
-        <!-- Running: percent + ETA + step in flight (the bar is the strip above). -->
+        <!-- Running: percent + step in flight (the progress bar is the strip above). -->
         <div v-if="provisionRunning" class="term-status">
           <span class="term-pct">[[ provProgress() ]]%</span>
-          <span class="term-eta" v-if="etaText()">ETA [[ etaText() ]]</span>
           <span class="term-cur" v-if="currentStep()">⟳ [[ currentStep() ]]</span>
         </div>
 
@@ -516,19 +515,6 @@
         if (!item.ok) return 'term-err';
         if (item.warn) return 'term-warn';
         return 'term-ok';
-      },
-      // etaText estimates the time left from the average step duration so far ×
-      // an estimated remaining count. The total is host-dependent (unknown up
-      // front), so it is a moving estimate that shrinks toward the end. Empty
-      // until at least one step has finished.
-      etaText() {
-        const done = this.provisionResult.length;
-        if (!done || !this.provStartMs || !this.nowMs) return '';
-        const elapsed = (this.nowMs - this.provStartMs) / 1000;
-        if (elapsed <= 0) return '';
-        const est = Math.max(20, done + 2);
-        const eta = Math.round((elapsed / done) * Math.max(0, est - done));
-        return eta > 0 ? eta + 's' : '';
       },
       // elapsedText is the wall-clock the finished run took.
       elapsedText() {
@@ -1086,7 +1072,6 @@
     font-variant-numeric: tabular-nums;
   }
   .term-pct { color: #58a6ff; font-weight: 700; }
-  .term-eta { color: #8b949e; }
   .term-cur { flex: 1 1 auto; min-width: 0; color: #58a6ff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .term-status-done .term-summary { color: #c9d1d9; font-weight: 600; letter-spacing: .5px; }
   .term-status-done .term-elapsed { color: #8b949e; }

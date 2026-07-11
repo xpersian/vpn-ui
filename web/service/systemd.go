@@ -74,6 +74,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+# The panel must run as root: it binds privileged ports, writes /etc + systemd
+# units, manages nftables/policy routing, and supervises the VPN daemons.
+User=root
+Group=root
 WorkingDirectory=%s
 ExecStart=%s
 Restart=on-failure
