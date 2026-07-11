@@ -1362,7 +1362,7 @@
           to_inbound = dbInbound.toInbound()
           this.inbounds.push(to_inbound);
           this.dbInbounds.push(dbInbound);
-          if ([Protocols.VMESS, Protocols.VLESS, Protocols.TROJAN, Protocols.SHADOWSOCKS, Protocols.L2TP, Protocols.PPTP, Protocols.OPENVPN].includes(inbound.protocol)) {
+          if ([Protocols.VMESS, Protocols.VLESS, Protocols.TROJAN, Protocols.SHADOWSOCKS, Protocols.L2TP, Protocols.PPTP, Protocols.OPENVPN, Protocols.OPENCONNECT].includes(inbound.protocol)) {
             if (dbInbound.isSS && (!to_inbound.isSSMultiUser)) {
               continue;
             }
@@ -1959,6 +1959,7 @@
           case Protocols.L2TP:
           case Protocols.PPTP:
           case Protocols.OPENVPN:
+          case Protocols.OPENCONNECT:
             return clients.findIndex(item => item && item.password === client.password && item.email === client.email);
           default: return clients.findIndex(item => item && item.id === client.id && item.email === client.email);
         }
@@ -2055,6 +2056,7 @@
           case Protocols.L2TP: return client.password;
           case Protocols.PPTP: return client.password;
           case Protocols.OPENVPN: return client.password;
+          case Protocols.OPENCONNECT: return client.password;
           case Protocols.SHADOWSOCKS: return client.email;
           case Protocols.HYSTERIA: return client.auth;
           default: return client.id;
@@ -2196,7 +2198,7 @@
         // set up; point the user at Core Settings. `data` is a plain object for
         // add/clone and FormData for update, so data.protocol only matches creates.
         if (typeof url === 'string' && url.endsWith('/inbounds/add') && !this.provisioned &&
-            data && [Protocols.L2TP, Protocols.PPTP, Protocols.OPENVPN].includes(data.protocol)) {
+            data && [Protocols.L2TP, Protocols.PPTP, Protocols.OPENVPN, Protocols.OPENCONNECT].includes(data.protocol)) {
           if (modal && typeof modal.close === 'function') modal.close();
           this.showSetupRequired();
           return;

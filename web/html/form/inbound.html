@@ -266,6 +266,11 @@
     {{template "form/openvpn"}}
 </template>
 
+<!-- openconnect -->
+<template v-if="inbound.protocol === Protocols.OPENCONNECT">
+    {{template "form/openconnect"}}
+</template>
+
 <!-- hysteria -->
 <template v-if="inbound.protocol === Protocols.HYSTERIA">
     {{template "form/hysteria"}}

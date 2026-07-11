@@ -533,6 +533,23 @@
                     inModal.inbound.settings.tlsCrypt = obj.tlsCrypt;
                 }
             },
+            async generateOcservCert() {
+                inModal.loading(true);
+                const idSeg = inModal.inbound.id ? inModal.inbound.id + '/' : '';
+                const msg = await HttpUtil.post('/panel/api/inbounds/' + idSeg + 'generate-ocserv-cert');
+                inModal.loading(false);
+                if (msg.success) {
+                    const obj = msg.obj;
+                    inModal.inbound.settings.tlsUseFile = false;
+                    inModal.inbound.settings.certificate = obj.certificate;
+                    inModal.inbound.settings.key = obj.key;
+                }
+            },
+            ocservSetDefaultCert() {
+                // Reuse the panel's own TLS certificate paths (webCertFile/webKeyFile).
+                inModal.inbound.settings.certificateFile = app.defaultCert;
+                inModal.inbound.settings.keyFile = app.defaultKey;
+            },
             async downloadOvpn(proto) {
                 const inbound = inModal.inbound;
                 const dbInbound = inModal.dbInbound;
