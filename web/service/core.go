@@ -100,6 +100,7 @@ type CoreService struct {
 	pptpService    PptpService
 	openvpnService OpenVpnService
 	ocservService  OcservService
+	sstpService    SstpService
 	xrayService    XrayService
 }
 
@@ -259,6 +260,13 @@ func (s *CoreService) MissingDokodemoPorts() []int {
 			}
 		}
 	}
+	if ins, err := s.sstpService.GetSstpInbounds(); err == nil {
+		for _, in := range ins {
+			if port := s.sstpService.GetTproxyPort(in); in.Enable && !dokodemoPortBound(port) {
+				missing = append(missing, port)
+			}
+		}
+	}
 	return missing
 }
 
@@ -271,6 +279,7 @@ func (s *CoreService) GetCoresStatus() []CoreStatus {
 		s.pptpStatus(),
 		s.openvpnStatus(),
 		s.ocservStatus(),
+		s.sstpStatus(),
 		s.radiusStatus(),
 	}
 }
@@ -401,6 +410,30 @@ func (s *CoreService) ocservStatus() CoreStatus {
 	return cs
 }
 
+func (s *CoreService) sstpStatus() CoreStatus {
+	cs := CoreStatus{Name: "sstp"}
+	inbounds, _ := s.sstpService.GetSstpInbounds()
+	cs.Inbounds = len(inbounds)
+	// accel-pppd ships as a relocatable TREE bundle (not a flat BinDir daemon), so
+	// daemonInstalled — which only consults PATH + backend.DaemonPath — misses it;
+	// HasAccelBundle covers the baked-in-binary case. Either presence = installed.
+	if !daemonInstalled("accel-pppd") && !backend.HasAccelBundle() {
+		cs.State = CoreNotInstalled
+		cs.Detail = "accel-ppp (accel-pppd) not installed"
+		return cs
+	}
+	cs.Version = daemonVersion("accel-pppd")
+	switch {
+	case procMgr.AnyRunningWithPrefix("sstp-server-"):
+		cs.State = CoreRunning
+	case cs.Inbounds == 0:
+		cs.State = CoreIdle
+	default:
+		cs.State = CoreStopped
+	}
+	return cs
+}
+
 func (s *CoreService) radiusStatus() CoreStatus {
 	cs := CoreStatus{Name: "radius"}
 	// RADIUS is embedded in the panel binary, so its version is the panel's.
@@ -467,7 +500,7 @@ func (s *CoreService) IsProvisioned() bool {
 // APPEND to this list when adding a new host-dependent protocol. An install that
 // was already provisioned for the older set is then told to re-run setup for the
 // new protocol only (see MissingProtocols), so upgrades don't silently miss it.
-var provisionProtocols = []string{"l2tp", "pptp", "openvpn", "openconnect"}
+var provisionProtocols = []string{"l2tp", "pptp", "openvpn", "openconnect", "sstp"}
 
 // provisionBaseline is FROZEN — the protocol set as of when per-protocol setup
 // tracking was introduced. Do NOT add to it; new protocols go in provisionProtocols
@@ -543,6 +576,8 @@ func (s *CoreService) RestartCore(name string) error {
 		return s.openvpnService.RestartServices()
 	case "openconnect":
 		return s.ocservService.RestartServices()
+	case "sstp":
+		return s.sstpService.RestartServices()
 	case "radius":
 		return RestartRadius()
 	case "ipsec":
@@ -557,7 +592,7 @@ func (s *CoreService) RestartCore(name string) error {
 // one failing core doesn't abort the rest.
 func (s *CoreService) RestartAll() error {
 	var errs []string
-	for _, name := range []string{"xray", "l2tp", "pptp", "openvpn", "openconnect", "radius"} {
+	for _, name := range []string{"xray", "l2tp", "pptp", "openvpn", "openconnect", "sstp", "radius"} {
 		if err := s.RestartCore(name); err != nil {
 			errs = append(errs, fmt.Sprintf("%s: %v", name, err))
 		}
@@ -585,6 +620,9 @@ func (s *CoreService) StopCore(name string) error {
 	case "openconnect":
 		s.ocservService.StopServices()
 		return nil
+	case "sstp":
+		s.sstpService.StopServices()
+		return nil
 	case "radius":
 		return StopRadius()
 	case "ipsec":
@@ -607,6 +645,8 @@ func (s *CoreService) CoreLogs(name string) string {
 		return procMgr.LogsByPrefix("openvpn-server-")
 	case "openconnect":
 		return procMgr.LogsByPrefix("ocserv-server-")
+	case "sstp":
+		return procMgr.LogsByPrefix("sstp-server-")
 	case "xray":
 		out := filterLogs("xray")
 		if out == "" {
@@ -734,6 +774,19 @@ func (s *CoreService) runProvisionSteps(emit func(ProvisionStep)) (rebootModules
 			emit(ProvisionStep{Name: "link system pppd", OK: lErr == nil, Msg: msgOrOK(lErr)})
 			plErr := backend.LinkPluginDir()
 			emit(ProvisionStep{Name: "link pppd plugin dir", OK: plErr == nil, Msg: msgOrOK(plErr)})
+		}
+
+		// SSTP accel-ppp bundle (G1). accel-pppd is a relocatable tree like pppd (it
+		// dlopens the sstp/radius/auth modules + their deps), so extract it and point
+		// /usr/lib/accel-ppp at the bundle's module dir so the bare [modules] names in
+		// the generated accel-ppp.conf resolve to the bundled .so's. The daemon/CLI
+		// binaries themselves resolve via daemonBin → backend.AccelBinPath, so no
+		// PATH symlink is needed here.
+		if backend.HasAccelBundle() {
+			aErr := backend.ExtractAccelBundle()
+			emit(ProvisionStep{Name: "extract accel-ppp (SSTP) bundle", OK: aErr == nil, Msg: msgOrOK(aErr)})
+			amErr := backend.LinkAccelModuleDir()
+			emit(ProvisionStep{Name: "link accel-ppp module dir", OK: amErr == nil, Msg: msgOrOK(amErr)})
 		}
 
 		// pptpd execs pptpctrl from a fixed compiled-in path; point it at the
@@ -925,6 +978,7 @@ func (s *CoreService) StartProvision() bool {
 			cs.pptpService.InitPptp()
 			cs.openvpnService.InitOpenVpn()
 			cs.ocservService.InitOcserv()
+			cs.sstpService.InitSstp()
 			if err := cs.xrayService.RestartXray(true); err != nil {
 				logger.Warning("provision: failed to restart xray after setup:", err)
 			}

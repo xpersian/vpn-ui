@@ -21,6 +21,7 @@ type XrayTrafficJob struct {
 	pptpService     service.PptpService
 	openvpnService  service.OpenVpnService
 	ocservService   service.OcservService
+	sstpService     service.SstpService
 	nftService      service.NftService
 	radiusService   *service.RadiusService
 }
@@ -40,6 +41,7 @@ func NewXrayTrafficJob(rs *service.RadiusService) *XrayTrafficJob {
 	j.pptpService.SetRadius(rs, "")
 	j.openvpnService.SetRadius(rs, "")
 	j.ocservService.SetRadius(rs, "")
+	j.sstpService.SetRadius(rs, "")
 	return j
 }
 
@@ -64,11 +66,13 @@ func (j *XrayTrafficJob) Run() {
 	pptpSessions := j.radiusService.GetSessions("pptp")
 	ovpnSessions := j.radiusService.GetSessions("openvpn")
 	ocservSessions := j.radiusService.GetSessions("openconnect")
-	if l2tpTraffics, pptpTraffics, ovpnTraffics, ocservTraffics := j.nftService.CollectAndResetTraffic(l2tpSessions, pptpSessions, ovpnSessions, ocservSessions); len(l2tpTraffics) > 0 || len(pptpTraffics) > 0 || len(ovpnTraffics) > 0 || len(ocservTraffics) > 0 {
+	sstpSessions := j.radiusService.GetSessions("sstp")
+	if l2tpTraffics, pptpTraffics, ovpnTraffics, ocservTraffics, sstpTraffics := j.nftService.CollectAndResetTraffic(l2tpSessions, pptpSessions, ovpnSessions, ocservSessions, sstpSessions); len(l2tpTraffics) > 0 || len(pptpTraffics) > 0 || len(ovpnTraffics) > 0 || len(ocservTraffics) > 0 || len(sstpTraffics) > 0 {
 		clientTraffics = append(clientTraffics, l2tpTraffics...)
 		clientTraffics = append(clientTraffics, pptpTraffics...)
 		clientTraffics = append(clientTraffics, ovpnTraffics...)
 		clientTraffics = append(clientTraffics, ocservTraffics...)
+		clientTraffics = append(clientTraffics, sstpTraffics...)
 	}
 
 	// Level-triggered enforcement: disconnect any STILL-connected client that is no
@@ -83,6 +87,7 @@ func (j *XrayTrafficJob) Run() {
 	j.pptpService.KillDisabledSessions()
 	j.openvpnService.KillDisabledSessions()
 	j.ocservService.KillDisabledSessions()
+	j.sstpService.KillDisabledSessions()
 
 	// Skip DB update if no traffic to process
 	if len(traffics) == 0 && len(clientTraffics) == 0 {

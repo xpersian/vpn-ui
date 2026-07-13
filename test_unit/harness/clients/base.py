@@ -17,7 +17,7 @@ from ..incus import Incus
 CLIENT_PKGS_APT = (
     "openvpn xl2tpd ppp strongswan strongswan-starter "
     "libstrongswan-extra-plugins libcharon-extra-plugins "
-    "pptp-linux ppp-mppe openconnect vpnc-scripts "
+    "pptp-linux ppp-mppe openconnect sstp-client vpnc-scripts "
     "curl iproute2 net-tools dnsutils"
 )
 
@@ -166,6 +166,7 @@ class Client:
         """Best-effort kill of every VPN client process + drop tunnels."""
         self.incus.exec(self.vm, (
             "pkill -f 'openvpn --config' 2>/dev/null; "
+            "pkill sstpc 2>/dev/null; "
             "poff -a 2>/dev/null; pkill pppd 2>/dev/null; "
             "(echo 'd vpn' > /var/run/xl2tpd/l2tp-control 2>/dev/null); "
             "pkill xl2tpd 2>/dev/null; "

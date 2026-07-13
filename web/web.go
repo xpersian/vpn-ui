@@ -110,6 +110,7 @@ type Server struct {
 	pptpService      service.PptpService
 	openvpnService   service.OpenVpnService
 	ocservService    service.OcservService
+	sstpService      service.SstpService
 	tgbotService     service.Tgbot
 	customGeoService *service.CustomGeoService
 
@@ -317,13 +318,15 @@ func (s *Server) startTask() {
 		s.pptpService.SetRadius(&s.radiusService, radiusSecret)
 		s.openvpnService.SetRadius(&s.radiusService, radiusSecret)
 		s.ocservService.SetRadius(&s.radiusService, radiusSecret)
+		s.sstpService.SetRadius(&s.radiusService, radiusSecret)
 	}
 
-	// Initialize L2TP/PPTP/OpenVPN/OpenConnect services before Xray so TPROXY/NAT rules are in place
+	// Initialize L2TP/PPTP/OpenVPN/OpenConnect/SSTP services before Xray so TPROXY/NAT rules are in place
 	s.l2tpService.InitL2tp()
 	s.pptpService.InitPptp()
 	s.openvpnService.InitOpenVpn()
 	s.ocservService.InitOcserv()
+	s.sstpService.InitSstp()
 
 	s.customGeoService.EnsureOnStartup()
 	err := s.xrayService.RestartXray(true)

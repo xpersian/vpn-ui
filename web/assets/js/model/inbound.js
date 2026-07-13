@@ -13,6 +13,7 @@ const Protocols = {
     PPTP: 'pptp',
     OPENVPN: 'openvpn',
     OPENCONNECT: 'openconnect',
+    SSTP: 'sstp',
 };
 
 // Display labels for the protocol picker. The Add/Edit inbound dropdown shows
@@ -33,6 +34,7 @@ const ProtocolLabels = {
     pptp: 'PPTP',
     openvpn: 'OpenVPN',
     openconnect: 'OpenConnect (cisco)',
+    sstp: 'SSTP',
 };
 
 const SSMethods = {
@@ -1661,6 +1663,7 @@ class Inbound extends XrayCommonClass {
             case Protocols.PPTP: return this.settings.pptpUsers;
             case Protocols.OPENVPN: return this.settings.openvpnUsers;
             case Protocols.OPENCONNECT: return this.settings.ocservUsers;
+            case Protocols.SSTP: return this.settings.sstpUsers;
             default: return null;
         }
     }
@@ -2392,6 +2395,7 @@ Inbound.Settings = class extends XrayCommonClass {
             case Protocols.PPTP: return new Inbound.PptpSettings(protocol);
             case Protocols.OPENVPN: return new Inbound.OpenvpnSettings(protocol);
             case Protocols.OPENCONNECT: return new Inbound.OcservSettings(protocol);
+            case Protocols.SSTP: return new Inbound.SstpSettings(protocol);
             default: return null;
         }
     }
@@ -2412,6 +2416,7 @@ Inbound.Settings = class extends XrayCommonClass {
             case Protocols.PPTP: return Inbound.PptpSettings.fromJson(json);
             case Protocols.OPENVPN: return Inbound.OpenvpnSettings.fromJson(json);
             case Protocols.OPENCONNECT: return Inbound.OcservSettings.fromJson(json);
+            case Protocols.SSTP: return Inbound.SstpSettings.fromJson(json);
             default: return null;
         }
     }
@@ -3695,6 +3700,194 @@ Inbound.OcservSettings.OcservUser = class extends XrayCommonClass {
     return json.map(
       (j) =>
         new Inbound.OcservSettings.OcservUser(
+          j.id,
+          j.password,
+          j.email,
+          j.enable ?? true,
+          j.expiryTime ?? 0,
+          j.tgId ?? "",
+          j.subId ?? "",
+          j.comment ?? "",
+          j.totalGB ?? 0,
+          j.limitIp ?? j.ipLimit ?? 0,
+          j.reset ?? 0,
+          j.created_at,
+          j.updated_at,
+        ),
+    );
+  }
+
+  static toJsonArray(users) {
+    return users.map((u) => u.toJson());
+  }
+
+  toJson() {
+    return {
+      id: this.id,
+      password: this.password,
+      email: this.email,
+      enable: this.enable,
+      expiryTime: this.expiryTime,
+      tgId: this.tgId,
+      subId: this.subId,
+      comment: this.comment,
+      totalGB: this.totalGB,
+      limitIp: this.limitIp,
+      reset: this.reset,
+      created_at: this.created_at,
+      updated_at: this.updated_at,
+    };
+  }
+
+  get _expiryTime() {
+    if (this.expiryTime === 0) {
+      return null;
+    }
+    if (this.expiryTime < 0) {
+      return this.expiryTime / -86400000;
+    }
+    return moment(this.expiryTime);
+  }
+
+  set _expiryTime(t) {
+    if (t == null || t === "") {
+      this.expiryTime = 0;
+    } else {
+      this.expiryTime = t.valueOf();
+    }
+  }
+
+  get _totalGB() {
+    return NumberFormatter.toFixed(this.totalGB / SizeFormatter.ONE_GB, 2);
+  }
+
+  set _totalGB(gb) {
+    this.totalGB = NumberFormatter.toFixed(gb * SizeFormatter.ONE_GB, 0);
+  }
+};
+
+// SSTP (accel-ppp). MS-SSTP over TLS (TCP), MSCHAPv2 auth. Same UI shape as
+// OpenConnect: TLS follows the Xray model (operator-supplied path or inline
+// content, or a generated self-signed cert). The IP range is panel-managed
+// (contiguous 10.5.x block) and shown read-only.
+Inbound.SstpSettings = class extends Inbound.Settings {
+  constructor(
+    protocol,
+    dns1 = "8.8.8.8",
+    dns2 = "8.8.4.4",
+    mtu = 1420,
+    tlsUseFile = false,
+    certificateFile = "",
+    keyFile = "",
+    certificate = "",
+    key = "",
+    caCert = "",
+    sstpUsers = [new Inbound.SstpSettings.SstpUser()],
+    clientToClient = false,
+    crossInbound = false,
+    ipRanges = [],
+    userLimit = 1,
+    userLimitStrategy = "accept",
+  ) {
+    super(protocol);
+    this.dns1 = dns1;
+    this.dns2 = dns2;
+    this.mtu = mtu;
+    this.tlsUseFile = tlsUseFile;
+    this.certificateFile = certificateFile;
+    this.keyFile = keyFile;
+    this.certificate = certificate;
+    this.key = key;
+    this.caCert = caCert;
+    this.sstpUsers = sstpUsers;
+    this.clientToClient = clientToClient;
+    this.crossInbound = crossInbound;
+    // Panel-managed, auto-assigned 10.5.x block. Read-only in the form.
+    this.ipRanges = ipRanges;
+    this.userLimit = userLimit;
+    this.userLimitStrategy = userLimitStrategy;
+  }
+
+  static fromJson(json = {}) {
+    return new Inbound.SstpSettings(
+      Protocols.SSTP,
+      json.dns1 ?? "8.8.8.8",
+      json.dns2 ?? "8.8.4.4",
+      json.mtu ?? 1420,
+      json.tlsUseFile ?? false,
+      json.certificateFile ?? "",
+      json.keyFile ?? "",
+      json.certificate ?? "",
+      json.key ?? "",
+      json.caCert ?? "",
+      Inbound.SstpSettings.SstpUser.fromJson(json.clients),
+      json.clientToClient ?? false,
+      json.crossInbound ?? false,
+      Array.isArray(json.ipRanges) ? json.ipRanges.slice() : [],
+      json.userLimit ?? 1,
+      json.userLimitStrategy ?? "accept",
+    );
+  }
+
+  toJson() {
+    return {
+      dns1: this.dns1,
+      dns2: this.dns2,
+      mtu: this.mtu,
+      tlsUseFile: this.tlsUseFile,
+      certificateFile: this.certificateFile,
+      keyFile: this.keyFile,
+      certificate: this.certificate,
+      key: this.key,
+      caCert: this.caCert,
+      clients: Inbound.SstpSettings.SstpUser.toJsonArray(this.sstpUsers),
+      clientToClient: this.clientToClient,
+      crossInbound: this.crossInbound,
+      ipRanges: this.ipRanges || [],
+      userLimit: this.userLimit,
+      userLimitStrategy: this.userLimitStrategy,
+    };
+  }
+};
+
+Inbound.SstpSettings.SstpUser = class extends XrayCommonClass {
+  constructor(
+    id = RandomUtil.randomLowerAndNum(8),
+    password = RandomUtil.randomSeq(10),
+    email = RandomUtil.randomLowerAndNum(9),
+    enable = true,
+    expiryTime = 0,
+    tgId = "",
+    subId = "",
+    comment = "",
+    totalGB = 0,
+    limitIp = 0,
+    reset = 0,
+    created_at = undefined,
+    updated_at = undefined,
+  ) {
+    super();
+    this.id = id;
+    this.password = password;
+    this.email = email;
+    this.enable = enable;
+    this.expiryTime = expiryTime;
+    this.tgId = tgId;
+    this.subId = subId;
+    this.comment = comment;
+    this.totalGB = totalGB;
+    this.limitIp = limitIp;
+    this.reset = reset;
+    this.created_at = created_at;
+    this.updated_at = updated_at;
+  }
+
+  static fromJson(json = []) {
+    if (!Array.isArray(json))
+      return [new Inbound.SstpSettings.SstpUser()];
+    return json.map(
+      (j) =>
+        new Inbound.SstpSettings.SstpUser(
           j.id,
           j.password,
           j.email,

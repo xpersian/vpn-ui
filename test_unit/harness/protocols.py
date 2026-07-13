@@ -15,22 +15,23 @@ from .clients import openvpn as ovpn
 from .clients import l2tp as l2tp_mod
 from .clients import pptp as pptp_mod
 from .clients import openconnect as oc_mod
+from .clients import sstp as sstp_mod
 from .clients.base import Client
 from .model import Phase, SubTest, Status
-from .model import PHASE_OPENVPN, PHASE_L2TP, PHASE_PPTP, PHASE_OPENCONNECT
+from .model import PHASE_OPENVPN, PHASE_L2TP, PHASE_PPTP, PHASE_OPENCONNECT, PHASE_SSTP
 
 # cross-inbound peer: X's cross test pings a client on peer[X]'s inbound
 PEER = {"openvpn": "l2tp", "l2tp": "pptp", "pptp": "openvpn",
-        "openconnect": "openvpn"}
+        "openconnect": "openvpn", "sstp": "openvpn"}
 PHASE = {"openvpn": PHASE_OPENVPN, "l2tp": PHASE_L2TP, "pptp": PHASE_PPTP,
-         "openconnect": PHASE_OPENCONNECT}
+         "openconnect": PHASE_OPENCONNECT, "sstp": PHASE_SSTP}
 
 # Connect variant used when dialing the SECOND same-protocol inbound (TEST 1,
 # _multi_inbound_check): l2tp uses RAW (the client's IPsec config is pinned to the
 # primary's 17/1701, so a 2nd l2tp inbound is exercised over raw L2TP), openvpn
 # udp/new, pptp has no variant.
 _SECOND_VARIANT = {"openvpn": ("udp", "new"), "l2tp": "raw", "pptp": None,
-                   "openconnect": "dtls"}
+                   "openconnect": "dtls", "sstp": None}
 
 
 def _connect(client: Client, sc, proto: str, which: str, variant=None, ib=None):
@@ -49,6 +50,8 @@ def _connect(client: Client, sc, proto: str, which: str, variant=None, ib=None):
     if proto == "openconnect":
         return oc_mod.connect(client, ib, which, variant=variant or "dtls",
                               server_ip=sc.server_ip)
+    if proto == "sstp":
+        return sstp_mod.connect(client, ib, which, server_ip=sc.server_ip)
     raise ValueError(proto)
 
 
@@ -56,7 +59,8 @@ def _disconnect(client: Client, proto: str):
     {"openvpn": ovpn.disconnect,
      "l2tp": l2tp_mod.disconnect,
      "pptp": pptp_mod.disconnect,
-     "openconnect": oc_mod.disconnect}[proto](client)
+     "openconnect": oc_mod.disconnect,
+     "sstp": sstp_mod.disconnect}[proto](client)
 
 
 def _variants(proto: str):

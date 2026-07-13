@@ -292,6 +292,11 @@
     {{template "form/openconnect"}}
 </template>
 
+<!-- sstp -->
+<template v-if="inbound.protocol === Protocols.SSTP">
+    {{template "form/sstp"}}
+</template>
+
 <!-- hysteria -->
 <template v-if="inbound.protocol === Protocols.HYSTERIA">
     {{template "form/hysteria"}}

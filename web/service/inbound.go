@@ -259,7 +259,7 @@ func (s *InboundService) checkEmailExistForInbound(inbound *model.Inbound) (stri
 // protocols), silently killing the clients' route to the internet. Changes to
 // them are applied by a full Xray restart instead.
 func isVpnProtocol(p model.Protocol) bool {
-	return p == model.L2TP || p == model.PPTP || p == model.OPENVPN || p == model.OPENCONNECT
+	return p == model.L2TP || p == model.PPTP || p == model.OPENVPN || p == model.OPENCONNECT || p == model.SSTP
 }
 
 // AddInbound creates a new inbound configuration.
@@ -295,6 +295,31 @@ func (s *InboundService) validateInboundConfig(inbound *model.Inbound) error {
 		}
 		if strings.TrimSpace(st.CaCert) == "" || strings.TrimSpace(st.ServerCert) == "" {
 			return common.NewError("OpenVPN certificate is required: generate or provide a certificate before saving")
+		}
+		return nil
+	}
+
+	if inbound.Protocol == "sstp" {
+		var st struct {
+			TlsUseFile      bool   `json:"tlsUseFile"`
+			CertificateFile string `json:"certificateFile"`
+			KeyFile         string `json:"keyFile"`
+			Certificate     string `json:"certificate"`
+			Key             string `json:"key"`
+		}
+		if err := json.Unmarshal([]byte(inbound.Settings), &st); err != nil {
+			return common.NewError("Invalid SSTP settings:", err)
+		}
+		if !validPort(inbound.Port) {
+			return common.NewError("Invalid SSTP port (must be 1-65535):", inbound.Port)
+		}
+		// A server cert+key must be present before saving (accel-pppd's sstp module
+		// refuses to start without one): either operator-supplied file paths, or inline
+		// PEM content (e.g. from "Generate Self-Signed Cert"). Mirrors the OpenVPN guard.
+		hasFile := st.TlsUseFile && strings.TrimSpace(st.CertificateFile) != "" && strings.TrimSpace(st.KeyFile) != ""
+		hasInline := strings.TrimSpace(st.Certificate) != "" && strings.TrimSpace(st.Key) != ""
+		if !hasFile && !hasInline {
+			return common.NewError("SSTP certificate is required: generate or provide a certificate before saving")
 		}
 		return nil
 	}
@@ -357,7 +382,7 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, boo
 	// Secure client ID
 	for _, client := range clients {
 		switch inbound.Protocol {
-		case "trojan", "l2tp", "pptp":
+		case "trojan", "l2tp", "pptp", "sstp":
 			if client.Password == "" {
 				return inbound, false, common.NewError("empty client ID")
 			}
@@ -376,8 +401,8 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, boo
 		}
 	}
 
-	// Check for duplicate L2TP/PPTP/OpenVPN usernames
-	if inbound.Protocol == "l2tp" || inbound.Protocol == "pptp" || inbound.Protocol == "openvpn" {
+	// Check for duplicate L2TP/PPTP/OpenVPN/SSTP usernames
+	if inbound.Protocol == "l2tp" || inbound.Protocol == "pptp" || inbound.Protocol == "openvpn" || inbound.Protocol == "sstp" {
 		dupUser, err := s.checkPPPUsernamesForDuplicates(string(inbound.Protocol), clients)
 		if err != nil {
 			return inbound, false, err
@@ -808,8 +833,8 @@ func (s *InboundService) AddInboundClient(data *model.Inbound) (bool, error) {
 		}
 	}
 
-	// Check for duplicate L2TP/PPTP/OpenVPN usernames
-	if oldInbound.Protocol == "l2tp" || oldInbound.Protocol == "pptp" || oldInbound.Protocol == "openvpn" {
+	// Check for duplicate L2TP/PPTP/OpenVPN/SSTP usernames
+	if oldInbound.Protocol == "l2tp" || oldInbound.Protocol == "pptp" || oldInbound.Protocol == "openvpn" || oldInbound.Protocol == "sstp" {
 		dupUser, err := s.checkPPPUsernamesForDuplicates(string(oldInbound.Protocol), clients)
 		if err != nil {
 			return false, err
@@ -1235,8 +1260,8 @@ func (s *InboundService) UpdateInboundClient(data *model.Inbound, clientId strin
 		}
 	}
 
-	// Check for duplicate L2TP/PPTP/OpenVPN usernames (allow keeping the same username)
-	if oldInbound.Protocol == "l2tp" || oldInbound.Protocol == "pptp" || oldInbound.Protocol == "openvpn" {
+	// Check for duplicate L2TP/PPTP/OpenVPN/SSTP usernames (allow keeping the same username)
+	if oldInbound.Protocol == "l2tp" || oldInbound.Protocol == "pptp" || oldInbound.Protocol == "openvpn" || oldInbound.Protocol == "sstp" {
 		oldUsername := oldClients[clientIndex].ID
 		newUsername := clients[0].ID
 		if newUsername != oldUsername {

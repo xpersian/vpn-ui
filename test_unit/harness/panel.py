@@ -37,6 +37,11 @@ class Panel:
         self.password = password
         self.timeout = timeout
         self.s = requests.Session()
+        # Test panels (local VMs and remote boxes) serve HTTPS with a self-signed cert;
+        # the harness is the trusted operator, so skip verification.
+        self.s.verify = False
+        requests.packages.urllib3.disable_warnings(
+            requests.packages.urllib3.exceptions.InsecureRequestWarning)
 
     def set_host(self, host: str):
         """Repoint at a new host (e.g. after a reboot changed the DHCP lease)."""

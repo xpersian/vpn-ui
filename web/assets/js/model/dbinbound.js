@@ -164,6 +164,7 @@ class DBInbound {
             case Protocols.PPTP:
             case Protocols.OPENVPN:
             case Protocols.OPENCONNECT:
+            case Protocols.SSTP:
                 return true;
             case Protocols.SHADOWSOCKS:
                 return this.toInbound().isSSMultiUser;

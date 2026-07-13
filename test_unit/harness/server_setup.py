@@ -21,7 +21,8 @@ from .model import JobResult, SubTest, Status, PHASE_SETUP
 from .panel import Panel
 
 # protocol base octet for the 10.<base>.<id>.<host> tunnel address
-BASE = {"l2tp": 0, "pptp": 1, "ovpn-udp": 2, "ovpn-tcp": 3, "openconnect": 4}
+BASE = {"l2tp": 0, "pptp": 1, "ovpn-udp": 2, "ovpn-tcp": 3, "openconnect": 4,
+        "sstp": 5}
 
 PSK = "TestPSK-9182"  # L2TP/IPsec pre-shared key
 
@@ -33,6 +34,7 @@ L2TP_USER_LIMIT = 2
 OVPN_USER_LIMIT = 2
 PPTP_USER_LIMIT = 2
 OC_USER_LIMIT = 2
+SSTP_USER_LIMIT = 2
 
 # Ports for the SECOND same-protocol inbound (protocols.py multi-inbound test).
 # Distinct from the primary ports (openvpn udp 1194 / tcp 1443, l2tp 1701, pptp
@@ -45,6 +47,7 @@ SECOND_PORTS = {
     "l2tp":        {"udp": 1799},
     "pptp":        {"udp": 1798},
     "openconnect": {"udp": 4444},
+    "sstp":        {"udp": 8443},
 }
 
 
@@ -110,6 +113,21 @@ def build_second_inbound(panel: Panel, proto: str) -> Inbound:
         inb = panel.add_inbound("test-openconnect-2", ports["udp"], "openconnect", settings)
         return Inbound(
             protocol="openconnect", inbound_id=inb["id"], udp_port=ports["udp"],
+            tcp_port=0, accounts={"A": acct}, user_limit=1)
+    if proto == "sstp":
+        # accel-ppp listens on its OWN per-inbound port (like openvpn/ocserv, unlike
+        # xl2tpd/pptpd), so this 2nd inbound really binds a distinct SSTP/TLS port.
+        cert = panel.generate_ocserv_cert()
+        settings = {
+            "dns1": "1.1.1.1", "dns2": "8.8.8.8", "mtu": 1400,
+            "tlsUseFile": False,
+            "certificate": cert["certificate"], "key": cert["key"],
+            "clientToClient": True, "crossInbound": True,
+            "clients": [_dict_client(acct)],
+        }
+        inb = panel.add_inbound("test-sstp-2", ports["udp"], "sstp", settings)
+        return Inbound(
+            protocol="sstp", inbound_id=inb["id"], udp_port=ports["udp"],
             tcp_port=0, accounts={"A": acct}, user_limit=1)
     raise ValueError(proto)
 
@@ -295,6 +313,38 @@ def run(panel: Panel, server_ip: str, cfg: dict, result: JobResult,
 
     log(f"-> openconnect-inbound [{oc.status.value}] {oc.detail}")
 
+    # ---- SSTP inbound ---------------------------------------------------
+    # accel-ppp (PPP-over-TLS): self-signed TLS cert like openconnect, but PPP-family
+    # RADIUS/accounting like pptp. Port 443 (the SSTP default the native Windows
+    # client expects). The cert helper is shared with ocserv (same ECDSA self-signed).
+    log("-> creating sstp inbound (accel-ppp, self-signed TLS cert, 2 accounts)...")
+    ss = phase.add(SubTest("sstp-inbound"))
+    try:
+        cert = panel.generate_ocserv_cert()
+        settings = {
+            "dns1": "1.1.1.1", "dns2": "8.8.8.8", "mtu": 1400,
+            "tlsUseFile": False,
+            "certificate": cert["certificate"], "key": cert["key"],
+            "clientToClient": True, "crossInbound": True,
+            "userLimit": SSTP_USER_LIMIT,  # exercise the RADIUS per-account block allocator
+            "clients": [_dict_client(_acct("sstp", 0)),
+                        _dict_client(_acct("sstp", 1))],
+        }
+        inb = panel.add_inbound("test-sstp", 443, "sstp", settings)
+        iid = inb["id"]
+        sc.inbounds["sstp"] = Inbound(
+            protocol="sstp", inbound_id=iid, udp_port=443, tcp_port=0,
+            accounts={"A": _acct("sstp", 0), "B": _acct("sstp", 1)},
+            user_limit=SSTP_USER_LIMIT,
+        )
+        ss.status = Status.PASS
+        ss.detail = f"inbound {iid}, port 443 (SSTP/TLS), 2 accounts"
+    except Exception as e:  # noqa: BLE001
+        ss.status = Status.ERROR
+        ss.detail = str(e)[:300]
+
+    log(f"-> sstp-inbound [{ss.status.value}] {ss.detail}")
+
     # ---- source-IP routing rules (built-in outbounds, no external link) ----
     # Prove Xray routes by source IP using the two outbounds every config already
     # ships: `direct` (freedom) and `blocked` (blackhole). Author by email (the
@@ -391,7 +441,7 @@ def run(panel: Panel, server_ip: str, cfg: dict, result: JobResult,
         xr.detail = str(e)[:300]
 
     # fatal only if we couldn't build any inbound
-    if all(p not in sc.inbounds for p in ("openvpn", "l2tp", "pptp", "openconnect")):
+    if all(p not in sc.inbounds for p in ("openvpn", "l2tp", "pptp", "openconnect", "sstp")):
         return None
     return sc
 

@@ -143,6 +143,8 @@ func protocolBase(proto string) int {
 	// 3 is OpenVPN's TCP mirror (mirrorOvpnSubnet), not a protocol of its own.
 	case "openconnect":
 		return 4
+	case "sstp":
+		return 5
 	default: // l2tp
 		return 0
 	}
@@ -274,7 +276,7 @@ func usedVpnSubnets(excludeId int) map[string]bool {
 		return used
 	}
 	var inbounds []*model.Inbound
-	db.Where("protocol IN ?", []string{"l2tp", "pptp", "openvpn", "openconnect"}).Find(&inbounds)
+	db.Where("protocol IN ?", []string{"l2tp", "pptp", "openvpn", "openconnect", "sstp"}).Find(&inbounds)
 	for _, ib := range inbounds {
 		if ib.Id == excludeId {
 			continue
@@ -353,7 +355,7 @@ func AutoExpandVpnRanges(protocol string) {
 // re-allocated rather than rejected on conflict.
 func normalizeRanges(inbound *model.Inbound, excludeId int) error {
 	proto := string(inbound.Protocol)
-	if proto != "l2tp" && proto != "pptp" && proto != "openvpn" && proto != "openconnect" {
+	if proto != "l2tp" && proto != "pptp" && proto != "openvpn" && proto != "openconnect" && proto != "sstp" {
 		return nil
 	}
 

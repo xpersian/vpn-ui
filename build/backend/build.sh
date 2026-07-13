@@ -137,6 +137,21 @@ build_arch() {
         -v "$REPO_ROOT/build/backend/ocserv-bundle.sh:/ocserv-bundle.sh:ro" \
         alpine:3.22 sh -e /ocserv-bundle.sh
 
+    # accel-ppp (SSTP server) — HARVESTED from Alpine's musl accel-ppp package into
+    # a relocatable tree. accel-pppd dlopens its features as modules (libsstp.so,
+    # libradius.so, libauth_mschap_v2.so, …) via libtriton, so it can't be one
+    # static binary — same reason as pppd. Ships accel-pppd + accel-cmd +
+    # /usr/lib/accel-ppp/*.so modules + RADIUS dictionaries + ldd deps + musl loader
+    # as /out/accel-ppp-bundle.tgz, consumed by backend/accel.go. Separate Alpine
+    # 3.22 run so the (distro-package based) recipe stays self-contained, like
+    # pppd/libreswan above. (accel-ppp is Alpine community — has the SSTP module.)
+    step "Building accel-ppp (SSTP) bundle for $goarch"
+    docker run --rm ${DOCKER_NET:-} --platform "$platform" \
+        -e ARCH="$muslarch" \
+        -v "$outdir:/out" \
+        -v "$REPO_ROOT/build/backend/accel-ppp-bundle.sh:/accel-ppp-bundle.sh:ro" \
+        alpine:3.22 sh -e /accel-ppp-bundle.sh
+
     ok "Done: $(ls -lh "$outdir")"
 }
 

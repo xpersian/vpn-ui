@@ -1293,6 +1293,7 @@
       ipLimitEnable: false,
       pageSize: 0,
       provisioned: true,
+      missingProtocols: [],
     },
     methods: {
       loading(spinning = true) {
@@ -1352,6 +1353,8 @@
         // missing/failed value stays true so we never wrongly block (the server
         // enforces the real guard).
         this.provisioned = settings.provisioned !== false;
+        // Protocols added by a later update whose backend still needs a Re-run Setup.
+        this.missingProtocols = Array.isArray(settings.missingProtocols) ? settings.missingProtocols : [];
       },
       setInbounds(dbInbounds) {
         this.inbounds.splice(0);
@@ -1362,7 +1365,7 @@
           to_inbound = dbInbound.toInbound()
           this.inbounds.push(to_inbound);
           this.dbInbounds.push(dbInbound);
-          if ([Protocols.VMESS, Protocols.VLESS, Protocols.TROJAN, Protocols.SHADOWSOCKS, Protocols.L2TP, Protocols.PPTP, Protocols.OPENVPN, Protocols.OPENCONNECT].includes(inbound.protocol)) {
+          if ([Protocols.VMESS, Protocols.VLESS, Protocols.TROJAN, Protocols.SHADOWSOCKS, Protocols.L2TP, Protocols.PPTP, Protocols.OPENVPN, Protocols.OPENCONNECT, Protocols.SSTP].includes(inbound.protocol)) {
             if (dbInbound.isSS && (!to_inbound.isSSMultiUser)) {
               continue;
             }
@@ -1960,6 +1963,7 @@
           case Protocols.PPTP:
           case Protocols.OPENVPN:
           case Protocols.OPENCONNECT:
+          case Protocols.SSTP:
             return clients.findIndex(item => item && item.password === client.password && item.email === client.email);
           default: return clients.findIndex(item => item && item.id === client.id && item.email === client.email);
         }
@@ -2057,6 +2061,7 @@
           case Protocols.PPTP: return client.password;
           case Protocols.OPENVPN: return client.password;
           case Protocols.OPENCONNECT: return client.password;
+          case Protocols.SSTP: return client.password;
           case Protocols.SHADOWSOCKS: return client.email;
           case Protocols.HYSTERIA: return client.auth;
           default: return client.id;
@@ -2181,10 +2186,12 @@
           this.loading(false);
         }
       },
-      showSetupRequired() {
+      showSetupRequired(protocolSpecific = false) {
         this.$confirm({
           title: '{{ i18n "pages.inbounds.toasts.setupRequiredTitle" }}',
-          content: '{{ i18n "pages.inbounds.toasts.setupRequired" }}',
+          content: protocolSpecific
+            ? '{{ i18n "pages.inbounds.toasts.setupRequiredForProtocol" }}'
+            : '{{ i18n "pages.inbounds.toasts.setupRequired" }}',
           okText: '{{ i18n "pages.inbounds.toasts.setupRequiredOk" }}',
           cancelText: '{{ i18n "cancel" }}',
           class: themeSwitcher.currentTheme,
@@ -2197,11 +2204,18 @@
         // Block creating a VPN inbound (L2TP/PPTP/OpenVPN) before the backend is
         // set up; point the user at Core Settings. `data` is a plain object for
         // add/clone and FormData for update, so data.protocol only matches creates.
-        if (typeof url === 'string' && url.endsWith('/inbounds/add') && !this.provisioned &&
-            data && [Protocols.L2TP, Protocols.PPTP, Protocols.OPENVPN, Protocols.OPENCONNECT].includes(data.protocol)) {
-          if (modal && typeof modal.close === 'function') modal.close();
-          this.showSetupRequired();
-          return;
+        if (typeof url === 'string' && url.endsWith('/inbounds/add') &&
+            data && [Protocols.L2TP, Protocols.PPTP, Protocols.OPENVPN, Protocols.OPENCONNECT, Protocols.SSTP].includes(data.protocol)) {
+          // Not provisioned at all -> general message; provisioned but this protocol was
+          // added by a later update (still in missingProtocols) -> protocol-specific
+          // message. Both use the SAME modal (matching the initial setup prompt), not a toast.
+          const protocolNeedsSetup = this.provisioned && Array.isArray(this.missingProtocols)
+            && this.missingProtocols.includes(data.protocol);
+          if (!this.provisioned || protocolNeedsSetup) {
+            if (modal && typeof modal.close === 'function') modal.close();
+            this.showSetupRequired(protocolNeedsSetup);
+            return;
+          }
         }
         const msg = await HttpUtil.postWithModal(url, data, modal);
         if (msg.success) {

@@ -70,9 +70,10 @@ if [[ "${SKIP_CORE:-0}" != "1" ]]; then
 fi
 
 # 2. Static VPN daemon bundle (built in Docker/Alpine — pinned + slow, so cached).
-#    Rebuild when the daemons OR the libreswan (ALL_ALGS / MODP1024) bundle are
-#    missing, so a checkout that predates the libreswan bundle still picks it up.
-if ! compgen -G "backend/bin/$ARCH/*" > /dev/null 2>&1 || [[ ! -f "backend/bin/$ARCH/libreswan-bundle.tgz" ]]; then
+#    Rebuild when the daemons OR the libreswan (ALL_ALGS / MODP1024) OR the
+#    accel-ppp (SSTP) bundle are missing, so a checkout that predates either bundle
+#    still picks it up.
+if ! compgen -G "backend/bin/$ARCH/*" > /dev/null 2>&1 || [[ ! -f "backend/bin/$ARCH/libreswan-bundle.tgz" ]] || [[ ! -f "backend/bin/$ARCH/accel-ppp-bundle.tgz" ]]; then
     step "VPN daemon bundle"
     bash build/backend/build.sh "$ARCH"
 else

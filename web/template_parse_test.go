@@ -3,9 +3,51 @@ package web
 import (
 	"bytes"
 	"html/template"
+	"io/fs"
 	"strings"
 	"testing"
 )
+
+// TestAllTemplatesParseAndProtocolFormsDefined mirrors the production
+// getHtmlTemplate() walk over the entire embedded htmlFS, but — unlike production,
+// which silently ignores ParseFS errors — it FAILS on any parse error and then
+// asserts every protocol form's {{define}} resolved. This catches a broken or
+// mis-named per-protocol form (e.g. form/protocol/sstp.html) that would otherwise
+// only surface as a runtime 500 when the inbound modal renders {{template "form/x"}}.
+func TestAllTemplatesParseAndProtocolFormsDefined(t *testing.T) {
+	funcMap := template.FuncMap{
+		"i18n": func(key string, args ...string) (string, error) { return "", nil },
+	}
+	tpl := template.New("").Funcs(funcMap)
+	walkErr := fs.WalkDir(htmlFS, "html", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			return nil
+		}
+		newT, perr := tpl.ParseFS(htmlFS, path+"/*.html")
+		if perr != nil {
+			// dirs with no *.html yield "pattern matches no files" — skip like production does
+			if strings.Contains(perr.Error(), "matches no files") {
+				return nil
+			}
+			t.Errorf("ParseFS %s/*.html: %v", path, perr)
+			return nil
+		}
+		tpl = newT
+		return nil
+	})
+	if walkErr != nil {
+		t.Fatalf("walk htmlFS: %v", walkErr)
+	}
+	// every VPN protocol form must be defined (form/sstp is the new one)
+	for _, name := range []string{"form/sstp", "form/openconnect", "form/openvpn", "form/pptp", "form/l2tp"} {
+		if tpl.Lookup(name) == nil {
+			t.Errorf("template %q not defined — its protocol form failed to parse or is mis-named", name)
+		}
+	}
+}
 
 // TestEditedTemplatesParse guards the Go-template syntax of the HTML templates that
 // carry the multi-select / bulk-ops / export UI. getHtmlTemplate() silently ignores

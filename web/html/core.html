@@ -622,10 +622,10 @@
         this.reconnectTimer = setTimeout(probe, 20000);
       },
       coreTitle(name) {
-        return ({ xray: 'Xray', l2tp: 'L2TP', ipsec: 'IPsec (libreswan)', pptp: 'PPTP', openvpn: 'OpenVPN', openconnect: 'OpenConnect (cisco)', radius: 'RADIUS' })[name] || name;
+        return ({ xray: 'Xray', l2tp: 'L2TP', ipsec: 'IPsec (libreswan)', pptp: 'PPTP', openvpn: 'OpenVPN', openconnect: 'OpenConnect (cisco)', sstp: 'SSTP', radius: 'RADIUS' })[name] || name;
       },
       coreIcon(name) {
-        return ({ xray: 'tool', l2tp: 'lock', ipsec: 'security-scan', pptp: 'api', openvpn: 'safety-certificate', openconnect: 'cloud-server', radius: 'key' })[name] || 'appstore';
+        return ({ xray: 'tool', l2tp: 'lock', ipsec: 'security-scan', pptp: 'api', openvpn: 'safety-certificate', openconnect: 'cloud-server', sstp: 'windows', radius: 'key' })[name] || 'appstore';
       },
       stateText(state) {
         return ({

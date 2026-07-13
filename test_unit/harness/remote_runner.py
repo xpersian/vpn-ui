@@ -28,20 +28,22 @@ from . import protocols as P
 from .clients import openvpn as ovpn
 from .clients import l2tp as l2tp_mod
 from .clients import pptp as pptp_mod
+from .clients import sstp as sstp_mod
 from .clients.base import Client
 from .model import SubTest, Status
 from .panel import Panel
 from .server_setup import Inbound, Account, _dict_client, PSK
 
 # ---- fixed environment ------------------------------------------------------
-SERVER_IP = "65.109.217.240"
-PORT = 45252
-BP = "/20wlK50OmjlxpjA5/"
-SCHEME = "http"
-PUSER, PPASS = "tester", "Testpass123"
-SSH_PASS = "qva3F3Pm377a"
+# Fill in for your remote panel + SSH before running (do NOT commit real creds).
+SERVER_IP = "REPLACE_ME"
+PORT = 2083
+BP = "/REPLACE_ME/"
+SCHEME = "https"
+PUSER, PPASS = "REPLACE_ME", "REPLACE_ME"
+SSH_PASS = "REPLACE_ME"
 
-VM_A, VM_B, VM_C = "deb11", "deb13", "vm1"
+VM_A, VM_B, VM_C = "rtca", "rtcb", "rtcc"  # 3 existing apt client VMs behind one host NAT
 
 CFG = {
     "traffic_test": {
@@ -58,7 +60,7 @@ CFG = {
 }
 
 # openvpn 11194/11443, l2tp label 1901 (daemon binds 1701), pptp label 1902 (1723)
-PORTS = {"openvpn": (11194, 11443), "l2tp": (1901, 0), "pptp": (1902, 0)}
+PORTS = {"openvpn": (11194, 11443), "l2tp": (1901, 0), "pptp": (1902, 0), "sstp": (443, 0)}
 
 RESULTS = []  # (proto, transport, scenario, K, status, detail)
 
@@ -161,6 +163,16 @@ def make_inbound(panel, proto, K):
         inb = panel.add_inbound("rt-pptp", udp, "pptp", settings)
         return Inbound(protocol="pptp", inbound_id=inb["id"], udp_port=udp, tcp_port=0,
                        accounts={"A": a}, user_limit=K)
+    if proto == "sstp":
+        cert = panel.generate_ocserv_cert()  # self-signed; sstpc uses --cert-warn
+        settings = {"dns1": "1.1.1.1", "dns2": "8.8.8.8", "mtu": 1400,
+                    "tlsUseFile": False,
+                    "certificate": cert["certificate"], "key": cert["key"],
+                    "clientToClient": True, "crossInbound": True,
+                    "userLimit": K, "clients": [_dict_client(a)]}
+        inb = panel.add_inbound("rt-sstp", udp, "sstp", settings)  # udp = 443
+        return Inbound(protocol="sstp", inbound_id=inb["id"], udp_port=udp, tcp_port=0,
+                       accounts={"A": a}, user_limit=K)
     raise ValueError(proto)
 
 
@@ -189,6 +201,21 @@ def set_K_strategy(panel, ib, K, strat):
     ib.user_limit = K
 
 
+def author_freedom_route(panel, ibs):
+    """Author the A-account emails -> `direct` (freedom) outbound at the FRONT of the
+    xray routing rules so the test accounts reach the internet even when the box has a
+    default-deny backstop for the VPN range (this live box routes 10.0.0.0/13 -> blocked,
+    only specific IPs allowed). Same mechanism as server_setup.py; the DB backup covers
+    the xray template so the operator's routing is restored afterwards."""
+    tmpl = panel.get_xray_template()
+    routing = tmpl.setdefault("routing", {})
+    rules = routing.setdefault("rules", [])
+    a_emails = [ib.accounts["A"].email for ib in ibs.values()]
+    rules.insert(0, {"type": "field", "outboundTag": "direct", "user": a_emails})
+    panel.update_xray_template(tmpl)
+    log(f"authored A->freedom (direct) for {a_emails}")
+
+
 # ---- connect wrapper --------------------------------------------------------
 def connect(client, ib, proto, transport):
     if proto == "openvpn":
@@ -198,12 +225,14 @@ def connect(client, ib, proto, transport):
                                 server_ip=SERVER_IP)
     if proto == "pptp":
         return pptp_mod.connect(client, ib, "A", SERVER_IP)
+    if proto == "sstp":
+        return sstp_mod.connect(client, ib, "A", server_ip=SERVER_IP)
     raise ValueError(proto)
 
 
 def disc(client, proto):
     {"openvpn": ovpn.disconnect, "l2tp": l2tp_mod.disconnect,
-     "pptp": pptp_mod.disconnect}[proto](client)
+     "pptp": pptp_mod.disconnect, "sstp": sstp_mod.disconnect}[proto](client)
 
 
 def all_down(clients, proto):
@@ -383,7 +412,12 @@ def sc_accept(panel, ib, proto, transport, clients, K):
         if ip1:
             _, addrs, _ = server_exec(f"ip -o addr show 2>/dev/null | grep 'peer {ip1}/' || true")
             link_gone = (addrs or "").strip() == ""
-        evicted = server_evicted and (link_gone is not False)
+        # accept reuses the victim's IP for the incoming device, so the server-side
+        # 'peer <ip>/' probe sees the NEW device's live link -> link_gone is a false
+        # negative. Corroborate with the victim CLIENT losing its tunnel (mirrors the
+        # fix already in protocols.py _strategy_check).
+        victim_dropped = not devs[0].wait_iface(iface, timeout=4)
+        evicted = server_evicted and (victim_dropped or link_gone is not False)
         why = f"server_evicted={server_evicted} link_gone={link_gone}"
     if ok_base and admitted and evicted:
         rec(proto, transport, "strategy-accept", K, "PASS",
@@ -439,6 +473,7 @@ def main():
         ibs[p] = make_inbound(panel, p, 2)
         log(f"created {p} inbound id={ibs[p].inbound_id}")
         time.sleep(3)
+    author_freedom_route(panel, ibs)
     panel.restart_core("xray"); time.sleep(4)
 
     for p in protos:

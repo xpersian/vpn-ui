@@ -28,6 +28,7 @@ type XrayService struct {
 	pptpService    PptpService
 	openvpnService OpenVpnService
 	ocservService  OcservService
+	sstpService    SstpService
 	xrayAPI        xray.XrayAPI
 }
 
@@ -104,9 +105,9 @@ func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
 		if !inbound.Enable {
 			continue
 		}
-		// Skip L2TP/PPTP/OpenVPN/OpenConnect inbounds — they are not native Xray
+		// Skip L2TP/PPTP/OpenVPN/OpenConnect/SSTP inbounds — they are not native Xray
 		// protocols. All route through paired dokodemo-door inbounds injected below.
-		if inbound.Protocol == "l2tp" || inbound.Protocol == "pptp" || inbound.Protocol == "openvpn" || inbound.Protocol == "openconnect" {
+		if inbound.Protocol == "l2tp" || inbound.Protocol == "pptp" || inbound.Protocol == "openvpn" || inbound.Protocol == "openconnect" || inbound.Protocol == "sstp" {
 			continue
 		}
 		// get settings clients
@@ -229,6 +230,16 @@ func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
 			continue
 		}
 		dokodemoConfig := s.ocservService.GetDokodemoConfig(ocservInbound)
+		xrayConfig.InboundConfigs = append(xrayConfig.InboundConfigs, *dokodemoConfig)
+	}
+
+	// Inject paired dokodemo-door inbounds for SSTP
+	sstpInbounds, _ := s.sstpService.GetSstpInbounds()
+	for _, sstpInbound := range sstpInbounds {
+		if !sstpInbound.Enable {
+			continue
+		}
+		dokodemoConfig := s.sstpService.GetDokodemoConfig(sstpInbound)
 		xrayConfig.InboundConfigs = append(xrayConfig.InboundConfigs, *dokodemoConfig)
 	}
 

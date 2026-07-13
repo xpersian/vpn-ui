@@ -17,6 +17,12 @@ func daemonBin(name string) string {
 	if p := backend.DaemonPath(name); p != "" {
 		return p
 	}
+	// accel-ppp (SSTP) ships as a relocatable bundle TREE rooted at a fixed path,
+	// not a flat BinDir binary, so its launchers (accel-pppd/accel-cmd) resolve
+	// here rather than via DaemonPath.
+	if p := backend.AccelBinPath(name); p != "" {
+		return p
+	}
 	if p, err := exec.LookPath(name); err == nil {
 		return p
 	}
@@ -435,7 +441,12 @@ func migrateFromSystemd() {
 		// child processes need. Safe: procMgr has spawned nothing yet at this
 		// point, so only pre-existing processes match.
 		if commandExists("pkill") {
-			for _, d := range []string{"openvpn", "xl2tpd", "pptpd"} {
+			// accel-pppd (SSTP) runs through the bundle's musl loader-wrapper, so its
+			// cmdline contains ".../sbin/accel-pppd.bin"; a `-f` match on the resolved
+			// launcher path (".../sbin/accel-pppd") is a substring of that and reaps a
+			// stale orphan from a crashed panel. accel-pppd does NOT retitle itself
+			// (unlike ocserv), so it does not need the exact-name `-x` pass below.
+			for _, d := range []string{"openvpn", "xl2tpd", "pptpd", "accel-pppd"} {
 				bin := daemonBin(d)
 				if bin == d {
 					continue // unresolved — avoid a too-broad match on a bare name

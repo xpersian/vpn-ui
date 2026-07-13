@@ -231,12 +231,13 @@
                     if (!s.caCert || !s.serverCert) return false;
                     return true;
                 }
-                if (ib.protocol === "openconnect") {
+                if (ib.protocol === "openconnect" || ib.protocol === "sstp") {
                     const s = ib.settings || {};
                     if (!okPort(ib.port)) return false;
-                    // ocserv won't start without a TLS server cert+key — require one
-                    // just like OpenVPN. Either file paths (path mode) or pasted PEM
-                    // (content mode; the "Generate Self-Signed Cert" button fills these).
+                    // ocserv/accel-ppp won't start without a TLS server cert+key —
+                    // require one just like OpenVPN. Either file paths (path mode) or
+                    // pasted PEM (content mode; the "Generate Self-Signed Cert" button
+                    // fills these).
                     const trim = v => (typeof v === "string" ? v.trim() : "");
                     const hasCert = s.tlsUseFile
                         ? (trim(s.certificateFile) !== "" && trim(s.keyFile) !== "")
@@ -313,6 +314,8 @@
                     inModal.inbound.port = 1723;
                 } else if (protocol === 'openvpn') {
                     inModal.inbound.port = 1195;
+                } else if (protocol === 'sstp') {
+                    inModal.inbound.port = 443;
                 }
             },
             streamNetworkChange() {
@@ -563,6 +566,34 @@
                 }
             },
             ocservSetDefaultCert() {
+                // Reuse the panel's own TLS certificate paths (webCertFile/webKeyFile).
+                inModal.inbound.settings.certificateFile = app.defaultCert;
+                inModal.inbound.settings.keyFile = app.defaultKey;
+            },
+            generateSstpCert() {
+                // The native Windows SSTP client handles self-signed certs poorly,
+                // so warn before generating one (unlike OpenConnect/ocserv).
+                this.$confirm({
+                    title: "Self-signed certificate — Windows SSTP caveat",
+                    content: "The built-in Windows SSTP client rejects self-signed certificates unless you import the CA into the machine's Trusted Root Certification Authorities store AND set NoCertRevocationCheck=1 in the registry. There is no 'ignore certificate' option in the native Windows client. For real users, prefer a CA-signed certificate bound to a hostname. Generate a self-signed certificate anyway?",
+                    okText: "Generate anyway",
+                    cancelText: '{{ i18n "cancel" }}',
+                    class: themeSwitcher.currentTheme,
+                    onOk: async () => {
+                        inModal.loading(true);
+                        const idSeg = inModal.inbound.id ? inModal.inbound.id + '/' : '';
+                        const msg = await HttpUtil.post('/panel/api/inbounds/' + idSeg + 'generate-sstp-cert');
+                        inModal.loading(false);
+                        if (msg.success) {
+                            const obj = msg.obj;
+                            inModal.inbound.settings.tlsUseFile = false;
+                            inModal.inbound.settings.certificate = obj.certificate;
+                            inModal.inbound.settings.key = obj.key;
+                        }
+                    },
+                });
+            },
+            sstpSetDefaultCert() {
                 // Reuse the panel's own TLS certificate paths (webCertFile/webKeyFile).
                 inModal.inbound.settings.certificateFile = app.defaultCert;
                 inModal.inbound.settings.keyFile = app.defaultKey;

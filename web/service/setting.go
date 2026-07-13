@@ -849,7 +849,8 @@ func (s *SettingService) GetDefaultSettings(host string) (any, error) {
 		"remarkModel":    func() (any, error) { return s.GetRemarkModel() },
 		"datepicker":     func() (any, error) { return s.GetDatepicker() },
 		"ipLimitEnable":  func() (any, error) { return s.GetIpLimitEnable() },
-		"provisioned":    func() (any, error) { var cs CoreService; return cs.IsProvisioned(), nil },
+		"provisioned":      func() (any, error) { var cs CoreService; return cs.IsProvisioned(), nil },
+		"missingProtocols": func() (any, error) { var cs CoreService; return cs.MissingProtocols(), nil },
 	}
 
 	result := make(map[string]any)

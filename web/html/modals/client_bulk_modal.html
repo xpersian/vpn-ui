@@ -344,6 +344,8 @@
                     return new Inbound.OpenvpnSettings.OpenvpnUser();
                 case Protocols.OPENCONNECT:
                     return new Inbound.OcservSettings.OcservUser();
+                case Protocols.SSTP:
+                    return new Inbound.SstpSettings.SstpUser();
                 default:
                     return null;
             }

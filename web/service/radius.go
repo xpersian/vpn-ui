@@ -574,20 +574,33 @@ func (s *RadiusService) lookupEmail(protocol string, username string) string {
 	return ""
 }
 
-// KillSessionsByEmail kills pppd processes for all active L2TP/PPTP sessions matching
-// the given emails. It is the ppp teardown used by the L2TP/PPTP disable paths; the
-// map now also holds OpenConnect sessions (recorded at auth), which have no pppd/ppp
-// interface, so they are skipped here — OpenConnect disable/eviction goes through
-// occtl (OcservService.KillClient / killOcservByIP).
+// KillSessionsByEmail tears down every active session whose email is in the set. It
+// is the teardown the L2TP/PPTP disable paths call, but the session map is SHARED
+// across protocols, so it must dispatch by protocol family — SSTP and OpenConnect
+// are HYBRID and must NOT be torn down with killPPPByIP:
+//   - L2TP/PPTP: kill the owning pppd by pid file (clean Acct-Stop) then delete the
+//     ppp interface — the same reliable link teardown the User Limit eviction uses.
+//   - SSTP: accel-ppp is ONE daemon per inbound (no per-connection pppd, and deleting
+//     its ppp iface would desync the daemon), so evict natively through accel-cmd —
+//     the analogue of ocserv's occtl path — routing each IP to the inbound whose
+//     daemon holds it (sstpInboundForIP).
+//   - OpenConnect: skipped here entirely; ocserv sessions have no ppp interface and
+//     their disable/eviction goes through occtl (OcservService.KillClient /
+//     killOcservByIP).
 func (s *RadiusService) KillSessionsByEmail(emails map[string]bool) {
 	s.mu.Lock()
 	var toKill []string
+	var sstpKill []string
 	for _, sess := range s.sessions {
 		if sess.protocol == "openconnect" {
 			continue
 		}
 		if emails[sess.email] {
-			toKill = append(toKill, sess.ip)
+			if sess.protocol == "sstp" {
+				sstpKill = append(sstpKill, sess.ip)
+			} else {
+				toKill = append(toKill, sess.ip)
+			}
 		}
 	}
 	s.mu.Unlock()
@@ -600,6 +613,41 @@ func (s *RadiusService) KillSessionsByEmail(emails map[string]bool) {
 		s.killPppdByIP(ip)
 		killPPPByIP(ip)
 	}
+	// SSTP: native accel-cmd eviction, routed to the accel-pppd instance whose
+	// inbound owns the IP's /24. accel-cmd terminate is idempotent, so a session that
+	// KillDisabledSessions already reaped is a harmless no-op here.
+	for _, ip := range sstpKill {
+		if inbound := sstpInboundForIP(ip); inbound != nil {
+			_ = (&SstpService{}).KillClientIP(inbound, ip)
+		}
+	}
+}
+
+// sstpInboundForIP returns the SSTP inbound that owns tunnel IP `ip` — the inbound
+// whose panel-managed /24 range covers it — so an accel-cmd eviction reaches that
+// inbound's own accel-pppd control socket. It is the SSTP analogue of the inboundId
+// the ocserv eviction path threads through (killOcservByIP): accel-ppp runs one
+// daemon per inbound, so the IP alone can't say which daemon holds it — its /24
+// does. nil when no SSTP inbound claims the IP.
+func sstpInboundForIP(ip string) *model.Inbound {
+	dot := strings.LastIndexByte(ip, '.')
+	if dot < 0 {
+		return nil
+	}
+	prefix := ip[:dot] // "10.5.3.7" -> "10.5.3"
+	var sstp SstpService
+	inbounds, err := sstp.GetSstpInbounds()
+	if err != nil {
+		return nil
+	}
+	for _, inbound := range inbounds {
+		for _, sub := range sstp.GetSubnetsForInbound(inbound) {
+			if sub == prefix {
+				return inbound
+			}
+		}
+	}
+	return nil
 }
 
 // killPppdByIP finds and kills the pppd process that owns the given PPP client IP.
@@ -690,7 +738,7 @@ func (s *RadiusService) isIPActive(ip string, protocol string) bool {
 //     protocol on its single fixed port, so it can carry only ONE NAS-Identifier.
 //   - per-inbound, e.g. "l2tp-3" / "pptp-5": kept for backward compatibility.
 func parseNASIdentifier(nasID string) (protocol string, inboundId int, err error) {
-	if nasID == "l2tp" || nasID == "pptp" || nasID == "openvpn" || nasID == "openconnect" {
+	if nasID == "l2tp" || nasID == "pptp" || nasID == "openvpn" || nasID == "openconnect" || nasID == "sstp" {
 		return nasID, 0, nil
 	}
 
@@ -700,7 +748,7 @@ func parseNASIdentifier(nasID string) (protocol string, inboundId int, err error
 	}
 
 	protocol = parts[0]
-	if protocol != "l2tp" && protocol != "pptp" && protocol != "openvpn" && protocol != "openconnect" {
+	if protocol != "l2tp" && protocol != "pptp" && protocol != "openvpn" && protocol != "openconnect" && protocol != "sstp" {
 		return "", 0, fmt.Errorf("unknown protocol in NAS-Identifier: %s", protocol)
 	}
 
@@ -925,7 +973,12 @@ func (s *RadiusService) allocateBlockIP(inboundId, clientIndex int, blockIPs []s
 	// address (no internet) and the 1st is never evicted — exactly the reported bug.
 	// OpenConnect auths once per tunnel (no CHAP flapping), so a fresh free-IP-or-evict
 	// allocation per auth is correct and safe.
-	if skey != "" && protocol != "openconnect" {
+	//
+	// SSTP (accel-ppp) is EXCLUDED for the SAME reason: accel-ppp sends nasPort=0 for
+	// every session (verified live — two devices on one account behind ONE NAT collapsed
+	// to a single tunnel IP 10.5.2.2), and SSTP auths once per TLS tunnel (no CHAP flap),
+	// so it takes the free-IP-or-evict path like OpenConnect, not idempotent-redial.
+	if skey != "" && protocol != "openconnect" && protocol != "sstp" {
 		if ip, ok := s.stationIP[skey]; ok && isBlockIP[ip] {
 			s.stationSeen[skey] = now
 			s.pending[ip] = now
@@ -1037,9 +1090,13 @@ func (s *RadiusService) allocateBlockIP(inboundId, clientIndex int, blockIPs []s
 			}
 			s.nftService.RemoveClientAccounting(protocol, victimIP)
 			// Force the old device's link down. L2TP/PPTP delete the ppp interface;
-			// ocserv has no ppp iface, so disconnect the session via occtl instead.
+			// ocserv has no ppp iface, so disconnect via occtl; SSTP is a single
+			// accel-ppp daemon (no per-connection pppd), so disconnect via accel-cmd.
+			// inboundId is this account's inbound — the one whose daemon holds victimIP.
 			if protocol == "openconnect" {
 				killOcservByIP(inboundId, victimIP)
+			} else if protocol == "sstp" {
+				_ = (&SstpService{}).KillClientIP(&model.Inbound{Id: inboundId}, victimIP)
 			} else {
 				killPPPByIP(victimIP)
 			}
@@ -1175,12 +1232,13 @@ func BuildVpnEmailToIPMap() map[string][]string {
 		Email string `json:"email"`
 	}
 
-	// --- L2TP / PPTP / OpenConnect: single-network block, one IP (or K device IPs)
-	// per account. OpenConnect shares this model (contiguous 10.4 block, no mirror);
-	// its per-index/per-block IPs come out of computeVpnClientIP/vpnAccountDeviceIPs
-	// keyed on protocolBase("openconnect")=4, identical to the ppp path. ---
+	// --- L2TP / PPTP / OpenConnect / SSTP: single-network block, one IP (or K device
+	// IPs) per account. OpenConnect shares this model (contiguous 10.4 block, no
+	// mirror); SSTP is PPP-family (10.5, arbitrary /24 list like pptp). Their
+	// per-index/per-block IPs come out of computeVpnClientIP/vpnAccountDeviceIPs keyed
+	// on protocolBase(protocol), identical to the ppp path. ---
 	var pppInbounds []*model.Inbound
-	db.Where("protocol IN ? AND enable = ?", []string{"l2tp", "pptp", "openconnect"}, true).Find(&pppInbounds)
+	db.Where("protocol IN ? AND enable = ?", []string{"l2tp", "pptp", "openconnect", "sstp"}, true).Find(&pppInbounds)
 
 	type pppSettingsJSON struct {
 		IpRanges  []string      `json:"ipRanges"`
