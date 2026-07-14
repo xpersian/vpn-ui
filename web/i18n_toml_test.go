@@ -50,6 +50,7 @@ var knownMissing = keySet(
 	"pages.client.freeze", "pages.client.unfreeze", "pages.client.frozen",
 	"pages.index.checkUpdate", "pages.index.upToDate", "pages.index.updateAvailable",
 	"pages.index.updateNow", "pages.index.updateConfirm", "pages.index.updateStarted",
+	"pages.index.updateDownloading", "pages.index.updateInstalling", "pages.index.updateRestarting",
 	"pages.index.panelUpdate",
 	"pages.core.absent", "pages.core.actions", "pages.core.consoleTitle",
 	"pages.core.cores", "pages.core.disabled", "pages.core.editConfig",

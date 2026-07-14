@@ -57,6 +57,7 @@ func (a *ServerController) initRouter(g *gin.RouterGroup) {
 	g.GET("/getNewVlessEnc", a.getNewVlessEnc)
 	g.GET("/distroStatus", a.distroStatus)
 	g.GET("/checkUpdate", a.checkUpdate)
+	g.GET("/updateProgress", a.updateProgress)
 
 	g.POST("/stopXrayService", a.stopXrayService)
 	g.POST("/updatePanel", a.updatePanel)
@@ -213,6 +214,13 @@ func (a *ServerController) updatePanel(c *gin.Context) {
 		return
 	}
 	jsonObj(c, nil, nil)
+}
+
+// updateProgress reports the in-flight self-update's phase + download percent, polled
+// by the overview to render the update progress bar while updatePanel runs.
+func (a *ServerController) updateProgress(c *gin.Context) {
+	phase, percent := a.serverService.PanelUpdateProgress()
+	jsonObj(c, gin.H{"phase": phase, "percent": percent}, nil)
 }
 
 // installXray installs or updates Xray to the specified version.

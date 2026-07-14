@@ -83,6 +83,44 @@ func (s *ServerService) CheckPanelUpdate() (*PanelUpdateInfo, error) {
 	return info, nil
 }
 
+// Self-update progress, polled by the overview to render a % bar. percent is the
+// download percent (0-99 while downloading, 100 once the restart is armed); phase is
+// one of "" | "downloading" | "installing" | "restarting" | "error".
+var (
+	panelUpdatePercent atomic.Int32
+	panelUpdatePhase   atomic.Value // string
+)
+
+func setUpdateProgress(phase string, percent int32) {
+	panelUpdatePhase.Store(phase)
+	panelUpdatePercent.Store(percent)
+}
+
+// PanelUpdateProgress returns the current self-update phase and download percent.
+func (s *ServerService) PanelUpdateProgress() (string, int) {
+	phase, _ := panelUpdatePhase.Load().(string)
+	return phase, int(panelUpdatePercent.Load())
+}
+
+// progressReader tallies bytes read from the download so the overview can show a
+// live % bar via the PanelUpdateProgress poll.
+type progressReader struct {
+	r     io.Reader
+	total int64
+	read  int64
+}
+
+func (pr *progressReader) Read(p []byte) (int, error) {
+	n, err := pr.r.Read(p)
+	if n > 0 && pr.total > 0 {
+		pr.read += int64(n)
+		if pct := pr.read * 99 / pr.total; pct >= 0 && pct <= 99 {
+			panelUpdatePercent.Store(int32(pct))
+		}
+	}
+	return n, err
+}
+
 // UpdatePanel downloads the latest release binary, snapshots the DB, atomically
 // replaces the running executable, and restarts the panel so the new binary takes
 // over. Replacing a running ELF via rename is safe on Linux: the live process keeps
@@ -91,6 +129,7 @@ func (s *ServerService) UpdatePanel() error {
 	if !panelUpdateInFlight.CompareAndSwap(false, true) {
 		return fmt.Errorf("a panel update is already in progress")
 	}
+	setUpdateProgress("downloading", 0)
 	// Reset the guard on every early/error return. On success we intentionally leave
 	// it set: restartPanel is about to replace this process, so the in-memory flag
 	// dies with it (and blocks a duplicate update during the restart window).
@@ -98,6 +137,7 @@ func (s *ServerService) UpdatePanel() error {
 	defer func() {
 		if !restarting {
 			panelUpdateInFlight.Store(false)
+			setUpdateProgress("error", 0)
 		}
 	}()
 
@@ -127,6 +167,7 @@ func (s *ServerService) UpdatePanel() error {
 		return err
 	}
 
+	setUpdateProgress("installing", 99)
 	// Best-effort DB snapshot before the new binary can migrate it.
 	backupPanelDB()
 
@@ -143,6 +184,7 @@ func (s *ServerService) UpdatePanel() error {
 		return fmt.Errorf("replacing binary failed: %w", err)
 	}
 	logger.Infof("panel update: installed new binary at %s — restarting", exe)
+	setUpdateProgress("restarting", 100)
 
 	// Restart detached so our own termination can't abort the restart.
 	restarting = true
@@ -171,7 +213,12 @@ func downloadPanelBinary(dst, url string) error {
 		return err
 	}
 	defer f.Close()
-	if _, err := io.Copy(f, resp.Body); err != nil {
+	// Report download progress for the overview's % bar when the length is known.
+	var src io.Reader = resp.Body
+	if resp.ContentLength > 0 {
+		src = &progressReader{r: resp.Body, total: resp.ContentLength}
+	}
+	if _, err := io.Copy(f, src); err != nil {
 		return err
 	}
 	return nil
@@ -270,6 +317,16 @@ func copyFileBestEffort(src, dst string) error {
 // otherwise it re-execs the freshly installed binary in place.
 func restartPanel(exe string) {
 	time.Sleep(1 * time.Second) // give the HTTP response time to flush
+
+	// The re-exec below keeps the same PID, so execve does NOT kill our child
+	// processes — a surviving Xray keeps holding 127.0.0.1:62790 and collides with the
+	// new panel's fresh Xray ("address already in use"). Stop the supervised daemons
+	// and Xray first so nothing orphans. Under systemd the cgroup kill also reaps them
+	// (harmless here); the new panel's ReapOrphanXray is the crash-safe backstop for
+	// when this stop is skipped (SIGKILL) or races.
+	GetProcManager().StopAll()
+	_ = (&XrayService{}).StopXray()
+
 	var sd SystemdService
 	name := sd.GetServiceName()
 	if commandExists("systemctl") && systemctlActive(name) {

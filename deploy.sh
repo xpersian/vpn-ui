@@ -186,6 +186,14 @@ if systemctl is-active --quiet "$UNIT" 2>/dev/null; then
     act "stopping running ${UNIT} for replacement"
     systemctl stop "$UNIT" || true
 fi
+# Also reap a panel launched OUTSIDE systemd (a bare ./vpn-ui): the stop above only
+# touches the unit, so a hand-launched panel would keep the web + Xray ports bound and
+# collide with the unit we (re)start below. Its orphaned Xray/daemons are then cleared
+# by the fresh panel's own startup reap. Done before the new unit starts, so safe.
+if command -v pkill >/dev/null 2>&1; then
+    pkill -x vpn-ui 2>/dev/null || true
+    pkill -x "$(basename "$DEST")" 2>/dev/null || true
+fi
 
 # Safety net: on update, snapshot the DB (timestamped + tagged with the outgoing
 # version) before the new binary can touch or migrate it. The service is already

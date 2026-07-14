@@ -329,6 +329,11 @@ func (s *Server) startTask() {
 	s.sstpService.InitSstp()
 
 	s.customGeoService.EnsureOnStartup()
+	// Reap an orphaned Xray from a previous instance BEFORE starting ours — a panel
+	// self-update re-execs in place (same PID), leaving the old Xray alive and holding
+	// its ports; without this the fresh Xray fails to bind and loops in the error
+	// state. Mirrors the daemon reap the Init* calls above already do via procmgr.
+	s.xrayService.ReapOrphanXray()
 	err := s.xrayService.RestartXray(true)
 	if err != nil {
 		logger.Warning("start xray failed:", err)

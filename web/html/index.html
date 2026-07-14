@@ -217,8 +217,12 @@
                         {{ i18n "pages.index.updateNow" }}
                       </a-button>
                     </a-popconfirm>
-                    <span v-if="panelUpdate.updating" :style="{ color: '#1890ff' }">
-                      <a-icon type="loading"></a-icon> {{ i18n "pages.index.updateStarted" }}
+                    <span v-if="panelUpdate.updating"
+                      :style="{ display: 'inline-flex', alignItems: 'center', gap: '8px', minWidth: '210px' }">
+                      <a-progress :percent="panelUpdate.percent"
+                        :status="panelUpdate.phase === 'error' ? 'exception' : (panelUpdate.phase === 'restarting' ? 'success' : 'active')"
+                        size="small" :style="{ width: '130px', margin: 0 }"></a-progress>
+                      <span :style="{ color: '#1890ff', whiteSpace: 'nowrap' }">[[ panelUpdatePhaseText() ]]</span>
                     </span>
                     <a-tooltip v-if="panelUpdate.error" :title="panelUpdate.error">
                       <a-tag color="red" :style="{ cursor: 'help', margin: 0 }">
@@ -1107,7 +1111,7 @@
         url: '{{ i18n "pages.index.customGeoValidationUrl" }}',
       },
       coreStatuses: [],
-      panelUpdate: { checking: false, checked: false, available: false, latest: '', current: '', updating: false, error: '' },
+      panelUpdate: { checking: false, checked: false, available: false, latest: '', current: '', updating: false, error: '', percent: 0, phase: '' },
       geofilesModal: { visible: false },
       distroModal: { visible: false, pretty: '', tested: '' },
     },
@@ -1152,16 +1156,47 @@
       async doPanelUpdate() {
         this.panelUpdate.updating = true;
         this.panelUpdate.error = '';
+        this.panelUpdate.percent = 0;
+        this.panelUpdate.phase = 'downloading';
+        // Poll the server for live download/install progress while the (blocking)
+        // update request runs. Once it succeeds the panel restarts and these polls
+        // start failing — harmless, they're ignored — until the page reloads.
+        const poll = setInterval(async () => {
+          try {
+            const p = await HttpUtil.get('/panel/api/server/updateProgress');
+            if (p && p.success && p.obj) {
+              if (typeof p.obj.percent === 'number') this.panelUpdate.percent = p.obj.percent;
+              if (p.obj.phase) this.panelUpdate.phase = p.obj.phase;
+            }
+          } catch (e) { /* panel restarting — ignore */ }
+        }, 700);
         try {
           const msg = await HttpUtil.post('/panel/api/server/updatePanel');
           if (!msg || !msg.success) {
+            clearInterval(poll);
             this.panelUpdate.updating = false;
             this.panelUpdate.error = (msg && msg.msg) || 'update failed';
+            return;
           }
+          // Success: the new binary is installed and the panel is restarting. Hold the
+          // bar at 100% "restarting" and reload once it should be back up.
+          clearInterval(poll);
+          this.panelUpdate.phase = 'restarting';
+          this.panelUpdate.percent = 100;
+          setTimeout(() => location.reload(), 9000);
         } catch (e) {
+          clearInterval(poll);
           this.panelUpdate.updating = false;
           this.panelUpdate.error = '' + e;
         }
+      },
+      panelUpdatePhaseText() {
+        const map = {
+          downloading: '{{ i18n "pages.index.updateDownloading" }}',
+          installing: '{{ i18n "pages.index.updateInstalling" }}',
+          restarting: '{{ i18n "pages.index.updateRestarting" }}',
+        };
+        return map[this.panelUpdate.phase] || '{{ i18n "pages.index.updateStarted" }}';
       },
       // --- Unsupported-distro warning (dashboard modal) -----------------
       async checkDistroSupport() {

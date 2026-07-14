@@ -3,6 +3,10 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/mhsanaei/3x-ui/v2/logger"
@@ -444,6 +448,59 @@ func (s *XrayService) StopXray() error {
 		return p.Stop()
 	}
 	return errors.New("xray is not running")
+}
+
+// ReapOrphanXray kills a stray Xray left by a previous panel instance that never
+// stopped it — most importantly a self-update re-exec: syscall.Exec keeps the SAME
+// PID, so the old Xray survives as an orphaned child still holding 127.0.0.1:62790
+// (the API/dokodemo port) and every inbound port. The re-exec'd panel starts with
+// p == nil, so RestartXray's stop-guard is a no-op and it just spawns a SECOND Xray
+// that fails to bind ("address already in use") — the health job then reports the
+// error state in a permanent loop. Mirrors procmgr's daemon reap (procmgr.go).
+//
+// MUST be called at startup BEFORE the first RestartXray, while p is still nil, so it
+// can only ever match an orphan — never the Xray we manage.
+func (s *XrayService) ReapOrphanXray() {
+	if s.IsXrayRunning() {
+		return
+	}
+	// Our working directory. Xray inherits the panel's cwd, so we match orphaned xray
+	// processes by cwd == ours: a coexisting upstream x-ui's xray runs from a different
+	// dir and is never touched. We deliberately do NOT match /proc/<pid>/exe — the core
+	// bundle re-extracts bin/xray on startup (fresh inode), so an orphan's exe reads
+	// "…(deleted)" and would no longer compare equal; cwd (and the cmdline) are stable.
+	myCwd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	if resolved, err := filepath.EvalSymlinks(myCwd); err == nil {
+		myCwd = resolved
+	}
+	self := os.Getpid()
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil || pid == self {
+			continue
+		}
+		// Only xray processes (the bundled core binary name appears in the cmdline)...
+		cmdline, err := os.ReadFile("/proc/" + e.Name() + "/cmdline")
+		if err != nil || !strings.Contains(string(cmdline), "xray-linux-amd64") {
+			continue
+		}
+		// ...that were launched from OUR working directory.
+		cwd, err := os.Readlink("/proc/" + e.Name() + "/cwd")
+		if err != nil || cwd != myCwd {
+			continue
+		}
+		logger.Warning("reaping orphaned Xray holding its ports before start (e.g. from a self-update re-exec): pid", pid)
+		if proc, err := os.FindProcess(pid); err == nil {
+			_ = proc.Kill()
+		}
+	}
 }
 
 // SetToNeedRestart marks that Xray needs to be restarted.
