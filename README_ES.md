@@ -14,6 +14,7 @@ Este proyecto es una versión mejorada del panel **[3X-UI](https://github.com/MH
 - OpenVPN
 - OpenConnect (cisco)
 - SSTP
+- IKEv2
 
 ## Nuevas funcionalidades
 
@@ -42,8 +43,8 @@ Este proyecto es una versión mejorada del panel **[3X-UI](https://github.com/MH
 | <img src="https://cdn.simpleicons.org/ubuntu" width="32" height="32" alt="Ubuntu"> | **Ubuntu** | `22.04` | `24.04` | `26.04` |
 | <img src="https://cdn.simpleicons.org/debian" width="32" height="32" alt="Debian"> | **Debian** | `12` | `13` | |
 | <img src="https://cdn.simpleicons.org/fedora" width="32" height="32" alt="Fedora"> | **Fedora** | `43` | `44` | |
-| <img src="https://cdn.simpleicons.org/almalinux/2F80ED" width="32" height="32" alt="AlmaLinux"> | **AlmaLinux** | `8` | `9` | `10` |
-| <img src="https://cdn.simpleicons.org/rockylinux" width="32" height="32" alt="Rocky Linux"> | **Rocky Linux** | `8` | `9` | `10` |
+| <img src="https://cdn.simpleicons.org/almalinux/2F80ED" width="32" height="32" alt="AlmaLinux"> | **AlmaLinux** | `9` | `10` | |
+| <img src="https://cdn.simpleicons.org/rockylinux" width="32" height="32" alt="Rocky Linux"> | **Rocky Linux** | `9` | `10` | |
 | <img src="https://cdn.simpleicons.org/archlinux" width="32" height="32" alt="Arch Linux"> | **Arch Linux** | `Rolling` | | |
 
 
@@ -75,7 +76,7 @@ sudo /opt/vpn-ui/vpn-ui-amd64 --uninstall
 
 ```mermaid
 flowchart TB
-  Client["VPN Client<br/>(L2TP/IPsec · PPTP · OpenVPN · OpenConnect · SSTP)"]
+  Client["VPN Client<br/>(L2TP/IPsec · PPTP · OpenVPN · OpenConnect · SSTP · IKEv2)"]
 
   subgraph PANEL["vpn-ui panel — root process"]
     PROC["procmgr<br/>supervises the daemons"]
@@ -86,7 +87,7 @@ flowchart TB
   end
 
   subgraph DAEMON["Bundled VPN daemons (panel children)"]
-    D["xl2tpd + libreswan · pptpd · openvpn · ocserv · accel-ppp<br/>(pppd for L2TP/PPTP · accel-ppp for SSTP)"]
+    D["xl2tpd + strongSwan/charon · pptpd · openvpn · ocserv · accel-ppp<br/>(pppd for L2TP/PPTP · accel-ppp for SSTP · charon for IKEv2)"]
   end
 
   subgraph KERNEL["Linux kernel data plane"]
@@ -154,6 +155,7 @@ Se ha diseñado para este proyecto una prueba **E2E** completa en Python dentro 
 | `pptp` | connect variants + checks + peer reachability (PPTP) |
 | `openconnect` | connect variants + checks + peer reachability + same-NAT user-limit (OpenConnect/ocserv) |
 | `sstp` | connect variants + checks + peer reachability (SSTP/accel-ppp, PPP-over-TLS) |
+| `ikev2` | connect + checks + peer reachability (IKEv2/IPsec, strongSwan charon; eap-mschapv2 + psk + eap-tls) |
 | `bulk-ops` | bulk client add/sub/enable/disable + TXT/PDF export via API |
 | `backup-restore` | DB export + import round-trip |
 | `warp-socks` | Cloudflare warp-cli SOCKS install + egress |
