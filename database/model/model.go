@@ -28,6 +28,7 @@ const (
 	SSTP        Protocol = "sstp"
 	IKEV2       Protocol = "ikev2"
 	WGC         Protocol = "wg-c"
+	AWG         Protocol = "awg"
 	MTPROTO     Protocol = "mtproto"
 	SSH         Protocol = "ssh"
 	// UI stores Hysteria v1 and v2 both as "hysteria" and uses

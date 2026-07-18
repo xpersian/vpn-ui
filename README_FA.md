@@ -16,6 +16,7 @@
 - SSTP
 - IKEv2
 - WireGuard (C)
+- AmneziaWG (نسخه‌ی مبهم‌سازی‌شده‌ی WireGuard)
 - MTProto Proxy (Telegram)
 - SSH
 
@@ -81,7 +82,7 @@ sudo /opt/vpn-ui/vpn-ui-amd64 --uninstall
 
 ```mermaid
 flowchart TB
-  Client["VPN Client<br/>(L2TP/IPsec · PPTP · OpenVPN · OpenConnect · SSTP · IKEv2 · WireGuard (C))"]
+  Client["VPN Client<br/>(L2TP/IPsec · PPTP · OpenVPN · OpenConnect · SSTP · IKEv2 · WireGuard (C) · AmneziaWG)"]
   TGC["Telegram Client<br/>(MTProto Proxy)"]
   SSHC["SSH Client<br/>(ssh -D dynamic SOCKS · badvpn-udpgw for UDP)"]
 
@@ -100,7 +101,7 @@ flowchart TB
   end
 
   subgraph KERNEL["Linux kernel data plane"]
-    IFACE["ppp0 / tun0 / wgc0<br/>client is assigned a pool IP"]
+    IFACE["ppp0 / tun0 / wgc0 / awg0<br/>client is assigned a pool IP"]
     NFT["nftables mark:<br/>UDP → TPROXY · TCP → REDIRECT"]
     RULE["ip rule fwmark 1 → table 100"]
   end
@@ -117,6 +118,7 @@ flowchart TB
   %% control plane
   Client -->|"tunnel + credentials"| D
   Client -.->|"WireGuard (C): in-kernel wgc, no daemon"| IFACE
+  Client -.->|"AmneziaWG: in-kernel awg (DKMS module), no daemon<br/>obfuscated handshake: Jc/Jmin/Jmax · S1/S2 · H1-H4"| IFACE
   TGC -->|"obfuscated2 / dd / FakeTLS secret"| MT
   SSHC -->|"username + password (checked in-process, no RADIUS)"| SSHSRV
   D -.->|"MS-CHAPv2 Access-Request"| RAD
@@ -145,11 +147,13 @@ flowchart TB
 
 ## نحوه‌ی کار RBridge با پروتکل‌های بدون RADIUS
 
+برای دو پروتکل tunnel مبتنی بر کلید، یعنی **WireGuard (C)** و **AmneziaWG**، مقدار K در **User Limit** به هر اکانت تعداد K جای دستگاه می‌دهد: K جفت‌کلید، K فایل config و K آدرس IP متفاوت داخل tunnel، یعنی برای هر دستگاه یک config جداگانه. این همان مدلی است که سرویس‌های تجاری استفاده می‌کنند و باعث می‌شود یک اکانت همزمان روی موبایل، لپ‌تاپ و روتر کار کند، بدون اینکه دستگاه‌ها سر یک کلید با هم تداخل پیدا کنند.
 
 ```mermaid
 flowchart TB
   subgraph SRC["Non-RADIUS protocols (public-key / certificate auth, no RADIUS round-trip)"]
     WG["WireGuard (C)<br/>in-kernel, wgctrl-managed"]
+    AWG["AmneziaWG<br/>in-kernel amneziawg (DKMS), obfuscated"]
     IKE["IKEv2 PSK / EAP-TLS<br/>strongSwan charon"]
   end
 
@@ -169,9 +173,11 @@ flowchart TB
 
   %% control plane
   WG -.->|"peers + last-handshake"| P1
+  AWG -.->|"peers + last-handshake"| P1
   IKE -.->|"active SAs + Framed-IP"| P1
   SWEEP --> P1 --> P2 --> P3
   P2 -.->|"evict: remove peer / terminate SA"| WG
+  P2 -.->|"evict: remove peer"| AWG
   P2 -.->|"evict: terminate SA"| IKE
   P3 -->|"tunnel IP → account"| REG
   P3 -->|"add / remove counters"| ACCT
@@ -179,6 +185,7 @@ flowchart TB
 
   %% data plane
   WG ==> XRAY
+  AWG ==> XRAY
   IKE ==> XRAY
   ACCT -.- XRAY
 ```
@@ -215,6 +222,7 @@ git clone https://github.com/Sir-MmD/vpn-ui.git && cd vpn-ui
 | `sstp` | connect variants + checks + peer reachability (SSTP/accel-ppp, PPP-over-TLS) |
 | `ikev2` | connect + checks + peer reachability (IKEv2/IPsec, strongSwan charon; eap-mschapv2 + psk + eap-tls) |
 | `wg-c` | connect + checks + peer reachability + per-account usage/termination (WireGuard C, in-kernel wgctrl, gateway /29, + preshared-key mode) |
+| `awg` | connect + checks + peer reachability + per-account usage/termination (AmneziaWG, in-kernel amneziawg DKMS module, obfuscation params, + preshared-key mode) |
 | `mtproto` | alias: runs every MTProto phase below (MTProto Proxy, telemt) |
 | `mtproto-classic` | handshake + relay to a real Telegram DC + wrong-secret control + usage (obfuscated2) |
 | `mtproto-secure` | same, "dd" random-padding secret |

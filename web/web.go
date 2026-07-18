@@ -113,6 +113,7 @@ type Server struct {
 	sstpService      service.SstpService
 	ikev2Service     service.Ikev2Service
 	wgcService       service.WgcService
+	awgService       service.AwgService
 	mtprotoService   service.MtprotoService
 	sshService       service.SshService
 	tgbotService     service.Tgbot
@@ -334,6 +335,7 @@ func (s *Server) startTask() {
 	s.sstpService.InitSstp()
 	s.ikev2Service.InitIkev2()
 	s.wgcService.InitWgc()
+	s.awgService.InitAwg()
 	s.mtprotoService.InitMtproto()
 	s.sshService.InitSsh()
 

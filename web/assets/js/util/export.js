@@ -52,12 +52,13 @@ const AccountExport = {
           || proto === Protocols.SSTP || proto === Protocols.IKEV2
           || proto === Protocols.SSH);
         const isWgc = (proto === Protocols.WGC);
+        const isAwg = (proto === Protocols.AWG);
         const isMtproto = (proto === Protocols.MTPROTO);
         const isSsh = (proto === Protocols.SSH);
         // MTProto has no username (identity = email, the wg-c model) and no UUID; its
         // credential is the secret, which is already embedded in each link.
         const username = vpnUserPass ? (client.id || client.email || '') : (client.email || '');
-        const uuid = (!vpnUserPass && !isWgc && !isMtproto && client.id
+        const uuid = (!vpnUserPass && !isWgc && !isAwg && !isMtproto && client.id
           && client.id !== client.password && client.id !== client.email) ? client.id : '';
 
         const base = {
@@ -108,6 +109,22 @@ const AccountExport = {
         // importable) and the TXT config block. No password/UUID.
         if (isWgc) {
           const devices = await AccountExport._fetchConfigs(dbInbound.id, client.email, 'wgc-configs');
+          if (!devices.length) { cards.push(base); continue; }
+          for (const dev of devices) {
+            cards.push(Object.assign({}, base, {
+              remark: base.remark + (dev.remark ? ' (' + dev.remark + ')' : ''),
+              qr: dev.config || '',
+              configText: dev.config || '',
+            }));
+          }
+          continue;
+        }
+
+        // AmneziaWG: same key-based, server-rendered .conf as WireGuard (C), plus the
+        // obfuscation params baked into the [Interface] block. Use the config as both
+        // the QR payload and the TXT config block. No password/UUID.
+        if (isAwg) {
+          const devices = await AccountExport._fetchConfigs(dbInbound.id, client.email, 'awg-configs');
           if (!devices.length) { cards.push(base); continue; }
           for (const dev of devices) {
             cards.push(Object.assign({}, base, {
@@ -179,13 +196,13 @@ const AccountExport = {
     }
   },
 
-  // _isVpnProto reports whether the protocol is one of the 9 non-xray VPN protocols,
+  // _isVpnProto reports whether the protocol is one of the non-xray VPN protocols,
   // whose display name is a single clean label (no "/ tcp" transport suffix).
   _isVpnProto(dbInbound) {
     const p = (dbInbound.protocol || '').toLowerCase();
     return p === Protocols.L2TP || p === Protocols.PPTP || p === Protocols.OPENVPN
       || p === Protocols.OPENCONNECT || p === Protocols.SSTP || p === Protocols.IKEV2
-      || p === Protocols.WGC || p === Protocols.MTPROTO || p === Protocols.SSH;
+      || p === Protocols.WGC || p === Protocols.AWG || p === Protocols.MTPROTO || p === Protocols.SSH;
   },
 
   // _protocolLabel is the human display name shown in the TXT/PDF. The VPN protocols
@@ -212,6 +229,7 @@ const AccountExport = {
       case Protocols.SSTP: return 'SSTP';
       case Protocols.IKEV2: return 'IKEv2';
       case Protocols.WGC: return 'WireGuard (C)';
+      case Protocols.AWG: return 'AmneziaWG';
       case Protocols.SSH: return 'SSH';
       case Protocols.MTPROTO: return 'MTProto'; // mode appended per-card in buildCards
       default: return (dbInbound.protocol || '').toUpperCase();
@@ -249,8 +267,9 @@ const AccountExport = {
         : (s.ipsec !== undefined ? !!s.ipsec : true);
       return ipsecOn ? (s.ipsecPsk || s.psk || '') : '';
     }
-    // WireGuard (C): when preshared-key mode is on, each account has its own PSK.
-    if ((dbInbound.protocol || '').toLowerCase() === Protocols.WGC
+    // WireGuard (C) / AmneziaWG: when preshared-key mode is on, each account has its own PSK.
+    const wgLike = (dbInbound.protocol || '').toLowerCase();
+    if ((wgLike === Protocols.WGC || wgLike === Protocols.AWG)
         && inbound.settings && inbound.settings.pskEnable) {
       return (client && client.psk) || '';
     }

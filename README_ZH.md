@@ -16,6 +16,7 @@
 - SSTP
 - IKEv2
 - WireGuard (C)
+- AmneziaWG（混淆版 WireGuard）
 - MTProto Proxy (Telegram)
 - SSH
 
@@ -80,7 +81,7 @@ sudo /opt/vpn-ui/vpn-ui-amd64 --uninstall
 
 ```mermaid
 flowchart TB
-  Client["VPN Client<br/>(L2TP/IPsec · PPTP · OpenVPN · OpenConnect · SSTP · IKEv2 · WireGuard (C))"]
+  Client["VPN Client<br/>(L2TP/IPsec · PPTP · OpenVPN · OpenConnect · SSTP · IKEv2 · WireGuard (C) · AmneziaWG)"]
   TGC["Telegram Client<br/>(MTProto Proxy)"]
   SSHC["SSH Client<br/>(ssh -D dynamic SOCKS · badvpn-udpgw for UDP)"]
 
@@ -99,7 +100,7 @@ flowchart TB
   end
 
   subgraph KERNEL["Linux kernel data plane"]
-    IFACE["ppp0 / tun0 / wgc0<br/>client is assigned a pool IP"]
+    IFACE["ppp0 / tun0 / wgc0 / awg0<br/>client is assigned a pool IP"]
     NFT["nftables mark:<br/>UDP → TPROXY · TCP → REDIRECT"]
     RULE["ip rule fwmark 1 → table 100"]
   end
@@ -116,6 +117,7 @@ flowchart TB
   %% control plane
   Client -->|"tunnel + credentials"| D
   Client -.->|"WireGuard (C): in-kernel wgc, no daemon"| IFACE
+  Client -.->|"AmneziaWG: in-kernel awg (DKMS module), no daemon<br/>obfuscated handshake: Jc/Jmin/Jmax · S1/S2 · H1-H4"| IFACE
   TGC -->|"obfuscated2 / dd / FakeTLS secret"| MT
   SSHC -->|"username + password (checked in-process, no RADIUS)"| SSHSRV
   D -.->|"MS-CHAPv2 Access-Request"| RAD
@@ -144,12 +146,15 @@ flowchart TB
 
 ## RBridge 如何整合非 RADIUS 协议
 
-WireGuard (C) 以及 IKEv2 的 **PSK** / **EAP-TLS** 模式使用公钥或证书进行认证，因此不会与 RADIUS 进行往返交互；若不加处理，它们将没有会话记录、没有流量计费，也没有 **User Limit** 限制。**RBridge**（Radius Bridge）正好弥补了这一空缺：在每个流量统计周期里，它的 **Sweeper** 会轮询（poll）每个协议的活动隧道，执行配额（quota）、禁用以及每账户的 **User Limit** K（并将多余者用 evict 驱逐），然后把存活的会话汇入 RADIUS 协议本就在用的同一套内置 **RADIUS** 会话注册表与 **nftables** 计费之中。如此一来，基于密钥的协议在用量、配额和设备数限制上表现完全一致，并通过同一个 Xray **dokodemo-door** 数据平面出网。
+WireGuard (C)、AmneziaWG 以及 IKEv2 的 **PSK** / **EAP-TLS** 模式使用公钥或证书进行认证，因此不会与 RADIUS 进行往返交互；若不加处理，它们将没有会话记录、没有流量计费，也没有 **User Limit** 限制。**RBridge**（Radius Bridge）正好弥补了这一空缺：在每个流量统计周期里，它的 **Sweeper** 会轮询（poll）每个协议的活动隧道，执行配额（quota）、禁用以及每账户的 **User Limit** K（并将多余者用 evict 驱逐），然后把存活的会话汇入 RADIUS 协议本就在用的同一套内置 **RADIUS** 会话注册表与 **nftables** 计费之中。如此一来，基于密钥的协议在用量、配额和设备数限制上表现完全一致，并通过同一个 Xray **dokodemo-door** 数据平面出网。
+
+对于两个基于密钥的隧道协议，即 **WireGuard (C)** 和 **AmneziaWG**，取值为 K 的 **User Limit** 会为每个账户分配 K 个设备位：K 对密钥、K 份配置和 K 个互不相同的隧道 IP，每台设备一份配置。这与商业服务商采用的模型相同，也正因如此，同一个账户才能同时在手机、笔记本和路由器上使用，而不会让多台设备争抢同一把密钥。
 
 ```mermaid
 flowchart TB
   subgraph SRC["Non-RADIUS protocols (public-key / certificate auth, no RADIUS round-trip)"]
     WG["WireGuard (C)<br/>in-kernel, wgctrl-managed"]
+    AWG["AmneziaWG<br/>in-kernel amneziawg (DKMS), obfuscated"]
     IKE["IKEv2 PSK / EAP-TLS<br/>strongSwan charon"]
   end
 
@@ -169,9 +174,11 @@ flowchart TB
 
   %% control plane
   WG -.->|"peers + last-handshake"| P1
+  AWG -.->|"peers + last-handshake"| P1
   IKE -.->|"active SAs + Framed-IP"| P1
   SWEEP --> P1 --> P2 --> P3
   P2 -.->|"evict: remove peer / terminate SA"| WG
+  P2 -.->|"evict: remove peer"| AWG
   P2 -.->|"evict: terminate SA"| IKE
   P3 -->|"tunnel IP → account"| REG
   P3 -->|"add / remove counters"| ACCT
@@ -179,6 +186,7 @@ flowchart TB
 
   %% data plane
   WG ==> XRAY
+  AWG ==> XRAY
   IKE ==> XRAY
   ACCT -.- XRAY
 ```
@@ -215,6 +223,7 @@ git clone https://github.com/Sir-MmD/vpn-ui.git && cd vpn-ui
 | `sstp` | connect variants + checks + peer reachability (SSTP/accel-ppp, PPP-over-TLS) |
 | `ikev2` | connect + checks + peer reachability (IKEv2/IPsec, strongSwan charon; eap-mschapv2 + psk + eap-tls) |
 | `wg-c` | connect + checks + peer reachability + per-account usage/termination (WireGuard C, in-kernel wgctrl, gateway /29, + preshared-key mode) |
+| `awg` | connect + checks + peer reachability + per-account usage/termination (AmneziaWG, in-kernel amneziawg DKMS module, obfuscation params, + preshared-key mode) |
 | `mtproto` | alias: runs every MTProto phase below (MTProto Proxy, telemt) |
 | `mtproto-classic` | handshake + relay to a real Telegram DC + wrong-secret control + usage (obfuscated2) |
 | `mtproto-secure` | same, "dd" random-padding secret |

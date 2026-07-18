@@ -208,6 +208,10 @@ class DBInbound {
             case Protocols.WGC:
                 // WireGuard (C) is account-based (email identity, one keypair per account).
                 return true;
+            case Protocols.AWG:
+                // AmneziaWG is account-based (email identity, one keypair per account),
+                // the same gateway model as WireGuard (C) plus DPI obfuscation.
+                return true;
             case Protocols.MTPROTO:
                 // MTProto Proxy is account-based: one secret per account, many
                 // accounts per inbound (the proxy matches the presented secret).

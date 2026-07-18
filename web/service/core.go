@@ -116,6 +116,7 @@ type CoreService struct {
 	sstpService    SstpService
 	ikev2Service   Ikev2Service
 	wgcService     WgcService
+	awgService     AwgService
 	mtprotoService MtprotoService
 	sshService     SshService
 	xrayService    XrayService
@@ -315,6 +316,7 @@ func (s *CoreService) GetCoresStatus() []CoreStatus {
 		s.sstpStatus(),
 		s.ikev2Status(),
 		s.wgcStatus(),
+		s.awgStatus(),
 		s.mtprotoStatus(),
 		s.sshStatus(),
 		s.radiusStatus(),
@@ -535,6 +537,29 @@ func (s *CoreService) wgcStatus() CoreStatus {
 	return cs
 }
 
+// awgStatus reports the AmneziaWG core. Like wg-c it has no daemon: the data plane is the
+// out-of-tree amneziawg kernel module (DKMS-built) + the panel's wgctrl-managed interfaces.
+func (s *CoreService) awgStatus() CoreStatus {
+	cs := CoreStatus{Name: "awg"}
+	inbounds, _ := s.awgService.GetAwgInbounds()
+	cs.Inbounds = len(inbounds)
+	if !s.awgService.AmneziawgAvailable() {
+		cs.State = CoreNotInstalled
+		cs.Detail = "amneziawg kernel module not built (run Core Settings setup)"
+		return cs
+	}
+	cs.Version = amneziawgModuleVersion()
+	switch {
+	case cs.Inbounds == 0:
+		cs.State = CoreIdle
+	case s.awgService.AnyInterfaceUp():
+		cs.State = CoreRunning
+	default:
+		cs.State = CoreStopped
+	}
+	return cs
+}
+
 // mtprotoStatus reports the MTProto Proxy core. Unlike the tunnel protocols there
 // is no kernel module or interface to probe: telemt is a plain userspace relay, so
 // availability is just "is the bundled binary present" and liveness is "is any
@@ -645,7 +670,7 @@ func (s *CoreService) IsProvisioned() bool {
 // APPEND to this list when adding a new host-dependent protocol. An install that
 // was already provisioned for the older set is then told to re-run setup for the
 // new protocol only (see MissingProtocols), so upgrades don't silently miss it.
-var provisionProtocols = []string{"l2tp", "pptp", "openvpn", "openconnect", "sstp", "ikev2", "wgc", "mtproto"}
+var provisionProtocols = []string{"l2tp", "pptp", "openvpn", "openconnect", "sstp", "ikev2", "wgc", "awg", "mtproto"}
 
 // provisionBaseline is FROZEN — the protocol set as of when per-protocol setup
 // tracking was introduced. Do NOT add to it; new protocols go in provisionProtocols
@@ -727,6 +752,8 @@ func (s *CoreService) RestartCore(name string) error {
 		return s.ikev2Service.RestartServices()
 	case "wgc":
 		return s.wgcService.RestartServices()
+	case "awg":
+		return s.awgService.RestartServices()
 	case "mtproto":
 		return s.mtprotoService.RestartServices()
 	case "ssh":
@@ -745,7 +772,7 @@ func (s *CoreService) RestartCore(name string) error {
 // one failing core doesn't abort the rest.
 func (s *CoreService) RestartAll() error {
 	var errs []string
-	for _, name := range []string{"xray", "l2tp", "pptp", "openvpn", "openconnect", "sstp", "ikev2", "wgc", "mtproto", "ssh", "radius"} {
+	for _, name := range []string{"xray", "l2tp", "pptp", "openvpn", "openconnect", "sstp", "ikev2", "wgc", "awg", "mtproto", "ssh", "radius"} {
 		if err := s.RestartCore(name); err != nil {
 			errs = append(errs, fmt.Sprintf("%s: %v", name, err))
 		}
@@ -780,6 +807,8 @@ func (s *CoreService) StopCore(name string) error {
 		return s.ikev2Service.StopServices()
 	case "wgc":
 		return s.wgcService.StopServices()
+	case "awg":
+		return s.awgService.StopServices()
 	case "mtproto":
 		return s.mtprotoService.StopServices()
 	case "ssh":
@@ -819,6 +848,15 @@ func (s *CoreService) CoreLogs(name string) string {
 			up = "yes"
 		}
 		return fmt.Sprintf("WireGuard (C) runs in-kernel via wgctrl (no daemon log).\nModule version: %s\nInterface(s) up: %s", wireguardModuleVersion(), up)
+	case "awg":
+		if !s.awgService.AmneziawgAvailable() {
+			return "AmneziaWG: kernel module 'amneziawg' not built on this host (run Core Settings setup)."
+		}
+		up := "no"
+		if s.awgService.AnyInterfaceUp() {
+			up = "yes"
+		}
+		return fmt.Sprintf("AmneziaWG runs in-kernel via the wgctrl fork (no daemon log).\nModule version: %s\nInterface(s) up: %s", amneziawgModuleVersion(), up)
 	case "mtproto":
 		return procMgr.LogsByPrefix("mtproto-server-")
 	case "ssh":
@@ -1004,6 +1042,10 @@ func (s *CoreService) runProvisionSteps(emit func(ProvisionStep)) (rebootModules
 	if !backend.HasStrongswanBundle() {
 		emit(ensureLibreswan())
 	}
+
+	// AmneziaWG: DKMS-build + load the out-of-tree `amneziawg` kernel module from the
+	// vendored source (the project's only on-host compile). Warn-and-degrade on failure.
+	emit(ensureAmneziawg())
 
 	// L2TP/PPTP need PPP kernel modules that minimal/cloud kernels omit. Best-
 	// effort install of the distro's full kernel-modules package. When the modules

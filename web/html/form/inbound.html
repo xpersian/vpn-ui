@@ -112,6 +112,14 @@
                 {{ i18n "pages.inbounds.port" }}
                 <a-icon type="question-circle"></a-icon>
             </a-tooltip>
+            <a-tooltip v-else-if="inbound.protocol === 'awg'">
+                <template slot="title">
+                    UDP port the AmneziaWG interface listens on. Most clients
+                    use port 51821.
+                </template>
+                {{ i18n "pages.inbounds.port" }}
+                <a-icon type="question-circle"></a-icon>
+            </a-tooltip>
             <template v-else>{{ i18n "pages.inbounds.port" }}</template>
         </template>
         <a-input
@@ -599,6 +607,11 @@
 <!-- wgc (WireGuard C) -->
 <template v-if="inbound.protocol === Protocols.WGC">
     {{template "form/wgc"}}
+</template>
+
+<!-- awg (AmneziaWG) -->
+<template v-if="inbound.protocol === Protocols.AWG">
+    {{template "form/awg"}}
 </template>
 
 <!-- mtproto (MTProto Proxy) -->
