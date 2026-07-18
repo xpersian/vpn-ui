@@ -3,7 +3,6 @@ module github.com/mhsanaei/3x-ui/v2
 go 1.26.2
 
 require (
-	github.com/florianl/go-nfqueue/v2 v2.1.0
 	github.com/gin-contrib/gzip v1.2.6
 	github.com/gin-contrib/sessions v1.1.0
 	github.com/gin-gonic/gin v1.12.0
